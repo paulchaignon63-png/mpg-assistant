@@ -25,6 +25,7 @@ export default function TeamPage({
   const router = useRouter();
   const searchParams = useSearchParams();
   const divisionId = searchParams.get("division");
+  const championshipId = searchParams.get("championship");
 
   useEffect(() => {
     let cancelled = false;
@@ -47,6 +48,7 @@ export default function TeamPage({
           body: JSON.stringify({
             teamId: id,
             divisionId: divisionId ?? undefined,
+            championshipId: championshipId ?? undefined,
             formation: 343,
           }),
         });
@@ -65,7 +67,7 @@ export default function TeamPage({
     return () => {
       cancelled = true;
     };
-  }, [params, divisionId, router]);
+  }, [params, divisionId, championshipId, router]);
 
   const byPos = {
     G: recommended.filter((p) => p.position === "G"),

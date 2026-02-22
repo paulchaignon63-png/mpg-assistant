@@ -85,23 +85,36 @@ export default function DashboardPage() {
             {leagues.map((league, i) => {
               const divId = league.divisionId ?? league.leagueId ?? "";
               const teamId = league.teamId ?? (league.usersTeams ? Object.values(league.usersTeams)[0] : undefined);
+              const champ = league.championshipId;
+              const champId = typeof champ === "object" && champ && "value" in champ
+                ? String((champ as { value?: number }).value ?? "")
+                : String(champ ?? "");
               const href = teamId
-                ? `/equipe/${encodeURIComponent(teamId)}?division=${encodeURIComponent(divId)}`
+                ? `/equipe/${encodeURIComponent(teamId)}?division=${encodeURIComponent(divId)}&championship=${encodeURIComponent(champId)}`
                 : "#";
               const content = (
                 <div className="block rounded-xl border border-slate-700 bg-slate-800/50 p-4 transition hover:border-emerald-600/50 hover:bg-slate-800">
-                  <div className="font-medium text-white">{league.name ?? "Ligue"}</div>
-                  <div className="mt-1 text-sm text-slate-400">
-                    {league.championshipId ?? ""}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-medium text-white">{league.name ?? "Ligue"}</div>
+                      <div className="mt-1 text-sm text-slate-400">
+                        {league.championshipId ?? ""}
+                      </div>
+                    </div>
+                    {teamId && (
+                      <span className="text-sm font-medium text-emerald-400">
+                        Voir mon équipe →
+                      </span>
+                    )}
                   </div>
                 </div>
               );
               return teamId ? (
-                <Link key={divId || i} href={href}>
+                <Link key={divId || i} href={href} className="block cursor-pointer">
                   {content}
                 </Link>
               ) : (
-                <div key={divId || i} className="opacity-75">
+                <div key={divId || i} className="opacity-75 cursor-not-allowed" title="Impossible de récupérer l'équipe pour cette ligue">
                   {content}
                 </div>
               );

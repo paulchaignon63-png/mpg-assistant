@@ -14,17 +14,18 @@ export async function GET(request: NextRequest) {
     const items = dashboard.leaguesDivisionsItems ?? (dashboard as { leagues?: unknown[] }).leagues ?? [];
     const leagues = Array.isArray(items) ? items : [];
 
-    // Enrichir avec teamId si on a divisionId et userId
+    // Enrichir avec teamId pour chaque division
     const userId = request.headers.get("x-mpg-user-id");
     const enriched = await Promise.all(
       leagues.map(async (league: unknown) => {
         const l = league as { divisionId?: string; leagueId?: string; name?: string; championshipId?: string; [k: string]: unknown };
         const divId = l.divisionId ?? l.leagueId;
         let teamId: string | undefined;
-        if (userId && divId) {
+        if (divId) {
           try {
             const div = await client.getDivision(divId);
-            teamId = div.usersTeams?.[userId] ?? Object.values(div.usersTeams ?? {})[0] as string;
+            const teams = div.usersTeams ?? {};
+            teamId = (userId && teams[userId]) ?? Object.values(teams)[0] as string | undefined;
           } catch {
             // ignore
           }

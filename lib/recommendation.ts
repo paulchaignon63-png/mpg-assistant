@@ -50,8 +50,27 @@ function getPositionFromMpg(position?: string): Position {
   return "M";
 }
 
-function extractPlayersFromSquad(squad: Record<string, unknown> | undefined): EnrichedPlayer[] {
+export interface PoolPlayer {
+  id?: string;
+  name?: string;
+  firstName?: string;
+  lastName?: string;
+  position?: string | { toString?: () => string };
+  quotation?: number;
+  average?: number;
+  matchs?: number;
+  goals?: number;
+  clubId?: string;
+  clubName?: string;
+}
+
+function extractPlayersFromSquad(
+  squad: Record<string, unknown> | undefined,
+  poolPlayers: PoolPlayer[] = []
+): EnrichedPlayer[] {
   if (!squad || typeof squad !== "object") return [];
+
+  const poolById = new Map(poolPlayers.map((p) => [p.id, p]));
   const players: EnrichedPlayer[] = [];
   const posMap: Record<string, Position> = {
     goalkeeper: "G",
@@ -63,14 +82,34 @@ function extractPlayersFromSquad(squad: Record<string, unknown> | undefined): En
     attacker: "A",
     attackers: "A",
   };
+
+  // Structure 1: squad = { playerId: { pricePaid?, ... } } (MPG API)
   for (const [key, value] of Object.entries(squad)) {
+    const poolPlayer = poolById.get(key);
+    if (poolPlayer) {
+      const posStr = typeof poolPlayer.position === "object" ? poolPlayer.position?.toString?.() : String(poolPlayer.position ?? "");
+      const pos = getPositionFromMpg(posStr);
+      const name = poolPlayer.name ?? [poolPlayer.lastName, poolPlayer.firstName].filter(Boolean).join(" ").trim();
+      players.push({
+        ...poolPlayer,
+        name: name || poolPlayer.name,
+        position: pos,
+        recommendationScore: 0,
+      });
+      continue;
+    }
+
+    // Structure 2: squad = { position: [players] }
     const pos = posMap[key.toLowerCase?.() ?? key] ?? "M";
     const list = Array.isArray(value) ? value : [];
     for (const p of list) {
-      const mp = p as MpgPlayer & { position?: string };
-      const posFromPlayer = mp.position ? getPositionFromMpg(mp.position) : pos;
+      const mp = p as MpgPlayer & { position?: string; id?: string };
+      const fromPool = mp.id ? poolById.get(mp.id) : null;
+      const merged = fromPool ? { ...fromPool, ...mp } : mp;
+      const posStr = typeof merged.position === "object" ? (merged.position as { toString?: () => string })?.toString?.() : String(merged.position ?? "");
+      const posFromPlayer = posStr ? getPositionFromMpg(posStr) : pos;
       players.push({
-        ...mp,
+        ...merged,
         position: posFromPlayer,
         recommendationScore: 0,
       });
@@ -135,12 +174,14 @@ export function selectBest11(
 
 /**
  * Extrait les joueurs du squad MPG et retourne le meilleur 11
+ * poolPlayers: données complètes (nom, position, stats) depuis championship-players-pool
  */
 export function getRecommendedTeam(
   squad: Record<string, unknown> | undefined,
   formation: number = 343,
-  injuredNames: string[] = []
+  injuredNames: string[] = [],
+  poolPlayers: PoolPlayer[] = []
 ): EnrichedPlayer[] {
-  const players = extractPlayersFromSquad(squad);
+  const players = extractPlayersFromSquad(squad, poolPlayers);
   return selectBest11(players, formation, injuredNames);
 }
