@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { StatusBadge } from "./StatusBadge";
+import { MatchdayCountdown } from "./MatchdayCountdown";
 import type { LeagueStatus } from "./StatusBadge";
 
 export interface LeagueCardData {
@@ -12,6 +13,7 @@ export interface LeagueCardData {
   teamId?: string;
   usersTeams?: Record<string, string>;
   status?: LeagueStatus;
+  nextRealGameWeekDate?: string;
 }
 
 function formatChampionshipId(champ: unknown): string {
@@ -75,6 +77,15 @@ export function LeagueCard({ league, index }: LeagueCardProps) {
             <p className="mt-2 text-xs text-[#9CA3AF]">
               11 joueurs recommandés
             </p>
+          )}
+          {league.status === "active" && champId && (
+            <div className="mt-2">
+              <MatchdayCountdown
+                championshipId={champId}
+                mpgNextRealGameWeekDate={league.nextRealGameWeekDate}
+                compact
+              />
+            </div>
           )}
         </div>
         {isClickable && teamId ? (

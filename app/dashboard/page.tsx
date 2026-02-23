@@ -5,8 +5,20 @@ import { useRouter } from "next/navigation";
 import { LeagueCard, type LeagueCardData } from "@/components/LeagueCard";
 import { SectionHeader } from "@/components/SectionHeader";
 import { EmptyState } from "@/components/EmptyState";
+import { MatchdayCountdown } from "@/components/MatchdayCountdown";
 import type { LeagueStatus } from "@/components/StatusBadge";
 import { getLeagueStatus } from "@/lib/league-utils";
+
+function formatChampionshipId(champ: unknown): string {
+  if (champ == null) return "";
+  if (typeof champ === "object" && "value" in champ) {
+    return String((champ as { value?: number }).value ?? "");
+  }
+  if (typeof champ === "object" && "id" in champ) {
+    return String((champ as { id?: string | number }).id ?? "");
+  }
+  return String(champ);
+}
 
 interface League {
   leagueId?: string;
@@ -17,6 +29,7 @@ interface League {
   usersTeams?: Record<string, string>;
   status?: { status: string };
   mode?: { mode: string };
+  nextRealGameWeekDate?: string;
 }
 
 type EnrichedLeague = Omit<League, "status"> & { status: LeagueStatus };
@@ -136,6 +149,23 @@ export default function DashboardPage() {
         {error && (
           <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-red-400">
             {error}
+          </div>
+        )}
+
+        {leagues.length > 0 && (
+          <div className="mb-6 rounded-xl border border-emerald-500/30 bg-[#0F2F2B] p-4">
+            <h2 className="mb-2 text-sm font-medium text-[#9CA3AF]">
+              Prochaine journée
+            </h2>
+            <MatchdayCountdown
+              championshipId={
+                categorized.active.length > 0
+                  ? formatChampionshipId(categorized.active[0].championshipId) || "1"
+                  : "1"
+              }
+              leagueName={categorized.active[0]?.name}
+              mpgNextRealGameWeekDate={categorized.active[0]?.nextRealGameWeekDate}
+            />
           </div>
         )}
 

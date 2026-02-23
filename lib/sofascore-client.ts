@@ -21,6 +21,8 @@ const CHAMP_TO_SOFASCORE: Record<string, number> = {
   SERIE_A: 23,
   "6": 7,
   CHAMPIONS_LEAGUE: 7,
+  "7": 238,
+  LIGUE_SUPER: 238,
 };
 
 export interface SofascoreStandingRow {
@@ -164,6 +166,41 @@ export async function fetchSofascoreStandingsAndFixtures(
     rankByClub: result,
     totalTeams: Math.max(18, standings.length),
   };
+}
+
+export interface NextMatchdayResult {
+  firstMatchTimestamp: number;
+  gameWeek: number;
+}
+
+/**
+ * Récupère le timestamp du premier match de la prochaine journée.
+ * Parcourt les rounds (1 à 40) et retourne le premier match à venir.
+ */
+export async function getNextMatchdayFirstMatch(
+  championshipId: number | string
+): Promise<NextMatchdayResult | null> {
+  const tid = getUniqueTournamentId(championshipId);
+  if (tid == null) return null;
+
+  const seasonId = await getCurrentSeasonId(tid);
+  if (seasonId == null) return null;
+
+  const now = Math.floor(Date.now() / 1000);
+  for (let round = 1; round <= 40; round++) {
+    const eventsData = await fetchJson<{ events?: SofascoreEvent[] }>(
+      `${SOFASCORE_BASE}/unique-tournament/${tid}/season/${seasonId}/events/round/${round}`
+    );
+    const events = (eventsData?.events ?? []).filter((e) => e.startTimestamp > now);
+    if (events.length > 0) {
+      const first = events.sort((a, b) => a.startTimestamp - b.startTimestamp)[0];
+      return {
+        firstMatchTimestamp: first!.startTimestamp,
+        gameWeek: round,
+      };
+    }
+  }
+  return null;
 }
 
 /** Stats joueur agrégées depuis Sofascore (lineups + incidents) */
