@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { AVAILABLE_FORMATIONS, formatFormation, LOW_SCORE_LABELS, type LowScoreReason } from "@/lib/recommendation";
+import { AVAILABLE_FORMATIONS, formatFormation, LOW_SCORE_LABELS, type LofteurPlayer, type LowScoreReason } from "@/lib/recommendation";
+import { MatchdayCountdown } from "@/components/MatchdayCountdown";
 
 interface SubstitutePlayer {
   name?: string;
@@ -44,6 +45,50 @@ function SubstituteItem({ sub }: { sub: SubstitutePlayer }) {
   );
 }
 
+function ScoreHelpButton() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-emerald-500/50 bg-emerald-500/20 text-base font-semibold text-emerald-400 transition hover:bg-emerald-500/30 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+        aria-label="Comment est calculé le score reco ?"
+        aria-expanded={open}
+      >
+        ?
+      </button>
+      {open && (
+        <div
+          className="absolute right-0 top-full z-50 mt-2 w-72 rounded-lg border border-[#1F4641] bg-[#0F2F2B] p-3 shadow-lg"
+          role="tooltip"
+        >
+          <h3 className="mb-1.5 text-xs font-semibold text-emerald-400">
+            Comment est calculé le score reco ?
+          </h3>
+          <p className="text-xs leading-relaxed text-[#9CA3AF]">
+            Notre score combine la forme récente (5 derniers matchs), la
+            régularité, les buts et passes selon le poste, et la difficulté du
+            prochain adversaire. Les joueurs blessés ou incertains sont exclus
+            ou pénalisés.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ScoreBar({ score, max = 10 }: { score: number; max?: number }) {
   const pct = Math.min(100, Math.max(0, (score / max) * 100));
   return (
@@ -71,6 +116,7 @@ export default function TeamPage({
   const [leagueName, setLeagueName] = useState("");
   const [recommended, setRecommended] = useState<EnrichedPlayer[]>([]);
   const [substitutes, setSubstitutes] = useState<Record<string, SubstitutePlayer[]>>({ G: [], D: [], M: [], A: [] });
+  const [lofteurs, setLofteurs] = useState<LofteurPlayer[]>([]);
   const [selectedFormation, setSelectedFormation] = useState(343);
   const [loading, setLoading] = useState(true);
   const [formationLoading, setFormationLoading] = useState(false);
@@ -80,6 +126,7 @@ export default function TeamPage({
   const divisionId = searchParams.get("division");
   const championshipId = searchParams.get("championship");
   const leagueNameParam = searchParams.get("leagueName");
+  const mpgNextRealGameWeekDate = searchParams.get("nextRealGameWeekDate") ?? undefined;
 
   useEffect(() => {
     let cancelled = false;
@@ -110,9 +157,13 @@ export default function TeamPage({
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Erreur");
         if (!cancelled) {
+          // #region agent log
+          fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({location:"equipe/page.tsx:initialLoad",message:"API response received",data:{hasLofteurs:!!data.lofteurs,lofteursLength:data.lofteurs?.length??0,lofteursSample:data.lofteurs?.slice(0,3)},timestamp:Date.now(),hypothesisId:"H1,H2"})}).catch(()=>{});
+          // #endregion
           setTeamName(data.team ?? "Mon équipe");
           setRecommended(data.recommended ?? []);
           setSubstitutes(data.substitutes ?? { G: [], D: [], M: [], A: [] });
+          setLofteurs(data.lofteurs ?? []);
           const usedForm = data.formation ?? 343;
           setSelectedFormation((AVAILABLE_FORMATIONS as readonly number[]).includes(usedForm) ? usedForm : 343);
           if (!leagueNameParam) setLeagueName(data.team ?? "");
@@ -172,6 +223,7 @@ export default function TeamPage({
       if (!res.ok) throw new Error(data.error ?? "Erreur");
       setRecommended(data.recommended ?? []);
       setSubstitutes(data.substitutes ?? { G: [], D: [], M: [], A: [] });
+      setLofteurs(data.lofteurs ?? []);
       const usedForm = data.formation ?? newFormation;
       setSelectedFormation((AVAILABLE_FORMATIONS as readonly number[]).includes(usedForm) ? usedForm : newFormation);
     } catch (err) {
@@ -223,67 +275,73 @@ export default function TeamPage({
         </ol>
       </nav>
 
-      <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-8 lg:flex-row lg:items-start">
-        <div className="min-w-0 flex-1">
-          {error && (
-            <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-red-400">
-              {error}
+      <main className="mx-auto w-full max-w-[1600px]">
+        {error && (
+          <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-red-400">
+            {error}
+          </div>
+        )}
+
+        <header className="mb-8 text-center">
+          <h1 className="text-2xl font-bold tracking-tight text-[#F9FAFB] sm:text-3xl">
+            {leagueName || "Ligue"}
+          </h1>
+          {teamName && (
+            <p className="mt-6 text-lg text-[#9CA3AF]">
+              {teamName}
+            </p>
+          )}
+          {championshipId && (
+            <div className="mt-4 w-full max-w-2xl mx-auto rounded-xl border border-emerald-500/40 bg-[#0F2F2B] px-5 py-2.5 flex flex-col gap-0.5">
+              <h2 className="text-lg font-medium text-[#F9FAFB]">
+                Prochaine journée
+              </h2>
+              <MatchdayCountdown
+                championshipId={championshipId}
+                mpgNextRealGameWeekDate={mpgNextRealGameWeekDate}
+                leagueName={leagueNameParam ?? undefined}
+                variant="team"
+              />
             </div>
           )}
+        </header>
 
-          <header className="mb-8 text-center">
-            <h1 className="text-2xl font-bold tracking-tight text-[#F9FAFB] sm:text-3xl">
-              {leagueName || "Ligue"}
-            </h1>
-            {teamName && (
-              <p className="mt-6 text-lg text-[#9CA3AF]">
-                {teamName}
-              </p>
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+          <select
+            value={selectedFormation}
+            onChange={(e) => handleFormationChange(Number(e.target.value))}
+            disabled={formationLoading}
+            className="rounded-lg border border-[#1F4641] bg-[#0F2F2B] px-3 py-2 text-[#F9FAFB] focus:border-emerald-500/50 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 disabled:opacity-50"
+          >
+            {AVAILABLE_FORMATIONS.map((code) => (
+              <option key={code} value={code} className="bg-[#0F2F2B]">
+                {formatFormation(code)}
+              </option>
+            ))}
+          </select>
+          <div className="flex items-center gap-2">
+            <div
+              className="rounded-lg border border-[#1F4641] bg-[#0F2F2B]/50 px-4 py-3 text-sm"
+            >
+              <span className="text-emerald-400">Évaluation 11</span>
+              <span className="text-[#9CA3AF]"> — moyenne de l&apos;app officielle</span>
+              <span className="text-[#9CA3AF]"> — cote du joueur</span>
+            </div>
+            <ScoreHelpButton />
+            {formationLoading && (
+              <span className="inline-block animate-spin text-lg" aria-hidden>⚽</span>
             )}
-            <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
-              <select
-                value={selectedFormation}
-                onChange={(e) => handleFormationChange(Number(e.target.value))}
-                disabled={formationLoading}
-                className="rounded-lg border border-[#1F4641] bg-[#0F2F2B] px-3 py-2 text-[#F9FAFB] focus:border-emerald-500/50 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 disabled:opacity-50"
-              >
-                {AVAILABLE_FORMATIONS.map((code) => (
-                  <option key={code} value={code} className="bg-[#0F2F2B]">
-                    {formatFormation(code)}
-                  </option>
-                ))}
-              </select>
-              <span className="text-base font-medium text-emerald-400">
-                — Meilleur 11 recommandé
-                {formationLoading && (
-                  <span className="ml-2 inline-block animate-spin text-lg">⚽</span>
-                )}
-              </span>
-            </div>
-          </header>
-
-          <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-6">
-            <div className="min-w-0 flex-1 flex justify-end">
-              <div
-                className="w-fit rounded-lg border border-[#1F4641] bg-[#0F2F2B]/50 px-4 py-3 text-sm"
-                title="Le score reco combine la forme récente, la régularité, les buts/passes selon le poste, et la difficulté du prochain adversaire."
-              >
-                <span className="text-emerald-400">Évaluation 11</span>
-                <span className="text-[#9CA3AF]"> — moyenne de l&apos;app officielle</span>
-                <span className="text-[#9CA3AF]"> — cote du joueur</span>
-              </div>
-            </div>
-            <div className="hidden shrink-0 sm:block sm:w-52" aria-hidden />
           </div>
+        </div>
 
-          <div className="space-y-8">
-            {(["G", "D", "M", "A"] as const).map((pos) => (
-              <section key={pos} className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
-                <div className="min-w-0 flex-1">
-                  <h2 className="mb-3 text-base font-bold text-emerald-400">
-                    {posLabels[pos]}
-                  </h2>
-                  <div className="space-y-2">
+        <div className="space-y-8">
+          {(["G", "D", "M", "A"] as const).map((pos) => (
+              <section key={pos} className="flex flex-col gap-4">
+                <h2 className="text-base font-bold text-emerald-400">
+                  {posLabels[pos]}
+                </h2>
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-6">
+                  <div className="min-w-0 flex-1 space-y-2">
                     {byPos[pos].map((p, i) => (
                       <div
                         key={i}
@@ -312,42 +370,66 @@ export default function TeamPage({
                       </div>
                     ))}
                   </div>
-                </div>
-                {substitutes[pos] && substitutes[pos].length > 0 && (
-                  <div className="shrink-0 sm:w-52">
-                    <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-[#6B7280]">
-                      Remplaçants
-                    </h3>
-                    <div className="flex flex-col gap-1.5">
-                      {substitutes[pos].map((sub, i) => (
-                        <SubstituteItem key={i} sub={sub} />
-                      ))}
+                  {substitutes[pos] && substitutes[pos].length > 0 && (
+                    <div className="shrink-0 sm:min-w-[12rem]">
+                      <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-[#6B7280]">
+                        Remplaçants
+                      </h3>
+                      <div className="flex flex-col gap-1.5">
+                        {substitutes[pos].map((sub, i) => (
+                          <SubstituteItem key={i} sub={sub} />
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </section>
             ))}
-          </div>
-
-          <p className="mt-8 text-center text-sm text-[#9CA3AF]">
-            Copie cette composition sur ta plateforme avant la prochaine journée
-            !
-          </p>
         </div>
 
-        <aside className="sticky top-4 shrink-0 lg:w-56 xl:w-64 self-start">
-          <div className="rounded-xl border border-[#1F4641] bg-[#0F2F2B] p-3">
-            <h3 className="mb-1.5 text-xs font-semibold text-emerald-400">
-              Comment est calculé le score reco ?
-            </h3>
-            <p className="text-xs leading-relaxed text-[#9CA3AF]">
-              Notre score combine la forme récente (5 derniers matchs), la
-              régularité, les buts et passes selon le poste, et la difficulté du
-              prochain adversaire. Les joueurs blessés ou incertains sont exclus
-              ou pénalisés.
+        {lofteurs.length > 0 && (
+          <section className="mt-8">
+            <h2 className="mb-3 text-base font-bold text-[#9CA3AF]">
+              Lofteurs
+            </h2>
+            <p className="mb-3 text-xs text-[#6B7280]">
+              Joueurs dans ton équipe mais non retenus (ni titulaires ni remplaçants)
             </p>
-          </div>
-        </aside>
+            <div className="flex flex-wrap gap-2">
+              {[...lofteurs].sort((a, b) => b.recommendationScore - a.recommendationScore).map((p, i) => (
+                <span
+                  key={i}
+                  className="inline-flex items-center gap-2 rounded-lg border border-[#1F4641] bg-[#0F2F2B] px-3 py-2 text-sm text-[#9CA3AF]"
+                >
+                  <span className="font-medium text-[#F9FAFB]">{p.name ?? "?"}</span>
+                  {p.recommendationScore === 0 && p.scoreZeroReason ? (
+                    <span title={p.scoreZeroReason === "injured" ? "Blessé" : "Suspendu"} className="inline-flex shrink-0">
+                      {p.scoreZeroReason === "injured" ? (
+                        <span className="flex h-5 w-5 items-center justify-center rounded bg-white" aria-label="Blessé">
+                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="text-red-500">
+                            <path d="M2 2l8 8M10 2L2 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                          </svg>
+                        </span>
+                      ) : (
+                        <span className="flex h-5 w-5 items-center justify-center rounded bg-red-600" aria-label="Suspendu">
+                          <svg width="10" height="14" viewBox="0 0 10 14" fill="none" className="text-white">
+                            <rect width="10" height="14" rx="1" fill="currentColor" />
+                          </svg>
+                        </span>
+                      )}
+                    </span>
+                  ) : (
+                    <span className="text-emerald-400">{p.recommendationScore.toFixed(1)}</span>
+                  )}
+                </span>
+              ))}
+            </div>
+          </section>
+        )}
+
+        <p className="mt-8 text-center text-sm text-[#9CA3AF]">
+          Copie cette composition sur ta plateforme avant la prochaine journée !
+        </p>
       </main>
     </div>
   );

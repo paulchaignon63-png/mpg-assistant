@@ -5,19 +5,42 @@ import { useRouter } from "next/navigation";
 import { LeagueCard, type LeagueCardData } from "@/components/LeagueCard";
 import { SectionHeader } from "@/components/SectionHeader";
 import { EmptyState } from "@/components/EmptyState";
-import { MatchdayCountdown } from "@/components/MatchdayCountdown";
 import type { LeagueStatus } from "@/components/StatusBadge";
 import { getLeagueStatus } from "@/lib/league-utils";
 
-function formatChampionshipId(champ: unknown): string {
-  if (champ == null) return "";
-  if (typeof champ === "object" && "value" in champ) {
-    return String((champ as { value?: number }).value ?? "");
-  }
-  if (typeof champ === "object" && "id" in champ) {
-    return String((champ as { id?: string | number }).id ?? "");
-  }
-  return String(champ);
+function FinishedLeaguesDropdown({ leagues }: { leagues: EnrichedLeague[] }) {
+  const [isOpen, setIsOpen] = useState(false);
+  return (
+    <section>
+      <button
+        type="button"
+        onClick={() => setIsOpen((o) => !o)}
+        className="mb-3 flex w-full items-center justify-between rounded-lg border border-[#1F4641] bg-[#0F2F2B] px-4 py-3 text-left transition hover:border-[#2a5a52] focus:border-emerald-500/50 focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
+      >
+        <span className="flex items-center gap-2 text-sm font-medium text-[#9CA3AF]">
+          <span role="img" aria-hidden>🏆</span>
+          Ligues terminées ({leagues.length})
+        </span>
+        <span
+          className={`text-[#9CA3AF] transition-transform ${isOpen ? "rotate-180" : ""}`}
+          aria-hidden
+        >
+          ▼
+        </span>
+      </button>
+      {isOpen && (
+        <div className="space-y-3 opacity-90">
+          {leagues.map((league, i) => (
+            <LeagueCard
+              key={league.divisionId ?? league.leagueId ?? i}
+              league={league}
+              index={i}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
 }
 
 interface League {
@@ -152,23 +175,6 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {leagues.length > 0 && (
-          <div className="mb-6 rounded-xl border border-emerald-500/30 bg-[#0F2F2B] p-4">
-            <h2 className="mb-2 text-sm font-medium text-[#9CA3AF]">
-              Prochaine journée
-            </h2>
-            <MatchdayCountdown
-              championshipId={
-                categorized.active.length > 0
-                  ? formatChampionshipId(categorized.active[0].championshipId) || "1"
-                  : "1"
-              }
-              leagueName={categorized.active[0]?.name}
-              mpgNextRealGameWeekDate={categorized.active[0]?.nextRealGameWeekDate}
-            />
-          </div>
-        )}
-
         <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center">
           <input
             type="search"
@@ -246,31 +252,10 @@ export default function DashboardPage() {
               )}
             </section>
 
-            {/* Ligues terminées */}
-            <section>
-              <SectionHeader
-                icon="🏆"
-                title="Ligues terminées"
-                count={categorized.finished.length}
-              />
-              {categorized.finished.length === 0 ? (
-                <EmptyState
-                  icon="🏅"
-                  title="Aucune ligue terminée"
-                  description="Tes ligues archivées apparaîtront ici."
-                />
-              ) : (
-                <div className="space-y-3 opacity-90">
-                  {categorized.finished.map((league, i) => (
-                    <LeagueCard
-                      key={league.divisionId ?? league.leagueId ?? i}
-                      league={league}
-                      index={i}
-                    />
-                  ))}
-                </div>
-              )}
-            </section>
+            {/* Ligues terminées - menu déroulant verrouillé */}
+            {categorized.finished.length > 0 && (
+              <FinishedLeaguesDropdown leagues={categorized.finished} />
+            )}
           </div>
         )}
       </main>

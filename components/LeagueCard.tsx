@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { StatusBadge } from "./StatusBadge";
 import { MatchdayCountdown } from "./MatchdayCountdown";
+import { getChampionshipDisplay } from "@/lib/league-config";
 import type { LeagueStatus } from "./StatusBadge";
 
 export interface LeagueCardData {
@@ -42,11 +43,12 @@ export function LeagueCard({ league, index }: LeagueCardProps) {
   if (divId) params.set("division", divId);
   if (champId) params.set("championship", champId);
   if (league.name) params.set("leagueName", league.name);
+  if (league.nextRealGameWeekDate) params.set("nextRealGameWeekDate", league.nextRealGameWeekDate);
   const href = teamId
     ? `/equipe/${encodeURIComponent(teamId)}?${params.toString()}`
     : "#";
 
-  const isClickable = !!teamId;
+  const isClickable = !!teamId && league.status !== "finished";
   const status = league.status ?? (teamId ? "active" : "mercato");
 
   const baseCardClass =
@@ -68,22 +70,27 @@ export function LeagueCard({ league, index }: LeagueCardProps) {
           <h3 className="truncate text-lg font-semibold text-[#F9FAFB]">
             {league.name ?? "Ligue"}
           </h3>
-          <p className="mt-1 text-sm text-[#9CA3AF]">
-            {league.championshipId != null
-              ? formatChampionshipId(league.championshipId)
-              : ""}
-          </p>
-          {teamId && (league.status === "active" || league.status === "finished") && (
-            <p className="mt-2 text-xs text-[#9CA3AF]">
-              11 joueurs recommandés
-            </p>
-          )}
+          {champId && (() => {
+            const display = getChampionshipDisplay(champId);
+            return display ? (
+              <p className="mt-1 flex items-center gap-2 text-sm text-[#9CA3AF]">
+                <img
+                  src={`https://flagcdn.com/w40/${display.countryCode}.png`}
+                  alt=""
+                  width={24}
+                  height={18}
+                  className="inline-block h-[18px] w-8 shrink-0 rounded-sm object-cover"
+                />
+                <span>{display.name}</span>
+              </p>
+            ) : null;
+          })()}
           {league.status === "active" && champId && (
             <div className="mt-2">
               <MatchdayCountdown
                 championshipId={champId}
                 mpgNextRealGameWeekDate={league.nextRealGameWeekDate}
-                compact
+                variant="league"
               />
             </div>
           )}

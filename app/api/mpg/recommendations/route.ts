@@ -9,6 +9,7 @@ import {
   getOpponentRankForClub,
   type OpponentRankData,
 } from "@/lib/opponent-rank-service";
+import { isPlayerInInjuryList, isPlayerInjuryMatchWithContext } from "@/lib/injuries-service";
 import { fetchSofascoreStandingsAndFixtures } from "@/lib/sofascore-client";
 import { getRecommendedTeamWithSubstitutes, type PoolPlayer } from "@/lib/recommendation";
 
@@ -229,20 +230,40 @@ export async function POST(request: NextRequest) {
 
     const playersWithAdvRank = poolPlayers.filter((p) => p.nextOpponentRank != null).length;
     // #region agent log
+    const injuredFull = injuries.injured ?? [];
+    const injuredItems = injuries.injuredItems ?? [];
+    const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "").replace(/\s+/g, " ").trim();
+    const targetNames = ["Dembélé Ousmane", "Clauss Jonathan", "Wahi Elye", "Sangaré Mamadou", "Kaba Mohamed", "Akliouche Maghnes"];
+    const scoreZeroReasons: Record<string, "injured" | "suspended" | "unknown"> = {};
+    const isInSuspendedSet = (n: string) => {
+      const nNorm = norm(n);
+      const last = nNorm.split(" ").pop() ?? "";
+      return Array.from(suspensions ?? []).some((s) => s === nNorm || s.includes(last) || nNorm.includes(s));
+    };
+    for (const name of targetNames) {
+      const poolPlayer = poolPlayers.find((p) => {
+        const pName = p.name ?? [p.lastName, p.firstName].filter(Boolean).join(" ").trim();
+        return norm(pName || "").includes(norm(name)) || norm(name).includes(norm(pName || ""));
+      });
+      const club = (poolPlayer as { clubName?: string })?.clubName;
+      const inInjured = isPlayerInInjuryList(name, injuredFull) || (injuredItems.length > 0 && isPlayerInjuryMatchWithContext(name, club, injuredItems));
+      const inSuspended = isInSuspendedSet(name) || (poolPlayer && (poolPlayer as { isSuspended?: boolean }).isSuspended === true);
+      if (inInjured) scoreZeroReasons[name] = "injured";
+      else if (inSuspended) scoreZeroReasons[name] = "suspended";
+      else scoreZeroReasons[name] = "unknown";
+    }
     fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         location: "recommendations/route.ts:dataReceived",
-        message: "API-Football data used for recos",
+        message: "Injuries and suspensions for score-0 lofteurs",
         data: {
-          injuredCount: injuries.injured.length,
-          doubtfulCount: injuries.doubtful.length,
-          clubsWithAdvRank: opponentData.rankByClub.size,
-          totalTeams: opponentData.totalTeams,
-          playersWithAdvRank,
-          injuredNames: injuries.injured.slice(0, 5),
-          doubtfulNames: injuries.doubtful.slice(0, 5),
+          injuredCount: injuredFull.length,
+          injuredFull,
+          injuredItemsNames: injuredItems.map((i) => i.playerName),
+          suspendedList: Array.from(suspensions ?? []),
+          scoreZeroReasons,
         },
         timestamp: Date.now(),
         hypothesisId: "A,B",
@@ -253,7 +274,7 @@ export async function POST(request: NextRequest) {
     const championshipDays =
       (division as { liveState?: { currentGameWeek?: number } } | null)?.liveState?.currentGameWeek ?? 15;
 
-    const { recommended, substitutes } = getRecommendedTeamWithSubstitutes(
+    const { recommended, substitutes, lofteurs } = getRecommendedTeamWithSubstitutes(
       squad,
       form,
       injuries.injured,
@@ -286,11 +307,16 @@ export async function POST(request: NextRequest) {
     }).catch(() => {});
     // #endregion
 
+    // #region agent log
+    fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({location:"recommendations/route.ts:response",message:"lofteurs before send",data:{lofteursLength:lofteurs.length,lofteursSample:lofteurs.slice(0,3),recommendedCount:recommended.length},timestamp:Date.now(),hypothesisId:"H2,H3,H4"})}).catch(()=>{});
+    // #endregion
+
     return NextResponse.json({
       team: team.name,
       formation: form,
       recommended,
       substitutes,
+      lofteurs,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Erreur";

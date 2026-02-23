@@ -501,8 +501,17 @@ export function getRecommendedTeam(
   return selectBest11(players, formation, injuredNames, scoreOptions);
 }
 
+/** Joueur non sélectionné (ni titulaire ni remplaçant) — "lofteur" */
+export interface LofteurPlayer {
+  name?: string;
+  position?: Position;
+  recommendationScore: number;
+  /** Raison du score 0 : blessé ou suspendu */
+  scoreZeroReason?: "injured" | "suspended";
+}
+
 /**
- * Retourne le meilleur 11 et les remplaçants recommandés en une passe
+ * Retourne le meilleur 11, les remplaçants recommandés et les lofteurs (joueurs laissés au vestiaire)
  */
 export function getRecommendedTeamWithSubstitutes(
   squad: Record<string, unknown> | undefined,
@@ -510,11 +519,29 @@ export function getRecommendedTeamWithSubstitutes(
   injuredNames: string[] = [],
   poolPlayers: PoolPlayer[] = [],
   scoreOptions: ScoreOptions = {}
-): { recommended: EnrichedPlayer[]; substitutes: Record<Position, SubstitutePlayer[]> } {
+): { recommended: EnrichedPlayer[]; substitutes: Record<Position, SubstitutePlayer[]>; lofteurs: LofteurPlayer[] } {
   const players = extractPlayersFromSquad(squad, poolPlayers);
   const recommended = selectBest11(players, formation, injuredNames, scoreOptions);
   const substitutes = getRecommendedSubstitutes(players, recommended, formation);
-  return { recommended, substitutes };
+  const key = (p: { id?: string; name?: string; position?: string }) =>
+    p.id ?? `${p.name ?? ""}_${p.position ?? ""}`;
+  const selectedKeys = new Set([
+    ...recommended.map(key),
+    ...(["G", "D", "M", "A"] as const).flatMap((pos) => (substitutes[pos] ?? []).map(key)),
+  ]);
+  const lofteurs: LofteurPlayer[] = players
+    .filter((p) => !selectedKeys.has(key(p)))
+    .map((p) => {
+      const base: LofteurPlayer = { name: p.name, position: p.position, recommendationScore: p.recommendationScore };
+      if (p.recommendationScore === 0) {
+        base.scoreZeroReason = (p as { isSuspended?: boolean }).isSuspended === true ? "suspended" : "injured";
+      }
+      return base;
+    });
+  // #region agent log
+  (async()=>{try{await fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({location:"recommendation.ts:getRecommendedTeamWithSubstitutes",message:"lofteurs computed",data:{playersCount:players.length,recommendedCount:recommended.length,selectedKeysSize:selectedKeys.size,lofteursCount:lofteurs.length},timestamp:Date.now(),hypothesisId:"H3,H4"})})}catch{}})();
+  // #endregion
+  return { recommended, substitutes, lofteurs };
 }
 
 /**

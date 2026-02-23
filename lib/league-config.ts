@@ -129,6 +129,41 @@ const CHAMPIONSHIP_TO_CONFIG: Record<string, LeagueConfig> = {
 /** Config par défaut (Ligue 1) si championnat inconnu */
 const DEFAULT_CONFIG: LeagueConfig = CHAMPIONSHIP_TO_CONFIG["1"]!;
 
+/** Code ISO pays pour afficher le drapeau (image) */
+type CountryCode = "fr" | "gb" | "es" | "it" | "tr" | "eu";
+
+/** Nom du championnat + code pays pour l'icône drapeau (image rectangle bleu/blanc/rouge etc.) */
+const CHAMPIONSHIP_DISPLAY: Record<string, { name: string; countryCode: CountryCode }> = {
+  "1": { name: "Ligue 1", countryCode: "fr" },
+  LIGUE_1: { name: "Ligue 1", countryCode: "fr" },
+  "2": { name: "Premier League", countryCode: "gb" },
+  PREMIER_LEAGUE: { name: "Premier League", countryCode: "gb" },
+  "3": { name: "La Liga", countryCode: "es" },
+  LIGA: { name: "La Liga", countryCode: "es" },
+  "4": { name: "Ligue 2", countryCode: "fr" },
+  LIGUE_2: { name: "Ligue 2", countryCode: "fr" },
+  "5": { name: "Serie A", countryCode: "it" },
+  SERIE_A: { name: "Serie A", countryCode: "it" },
+  "6": { name: "Ligue des Champions", countryCode: "eu" },
+  CHAMPIONS_LEAGUE: { name: "Ligue des Champions", countryCode: "eu" },
+  "7": { name: "Super Lig", countryCode: "tr" },
+  LIGUE_SUPER: { name: "Super Lig", countryCode: "tr" },
+};
+
+const TM_LEAGUE_TO_COUNTRY: Record<string, CountryCode> = {
+  FR1: "fr", FR2: "fr", GB1: "gb", ES1: "es", IT1: "it", TR1: "tr", CL: "eu",
+};
+
+export function getChampionshipDisplay(championshipId: number | string | undefined): { name: string; countryCode: CountryCode } | null {
+  if (championshipId == null || championshipId === "") return null;
+  const key = String(championshipId).trim();
+  const known = CHAMPIONSHIP_DISPLAY[key];
+  if (known) return known;
+  const config = CHAMPIONSHIP_TO_CONFIG[key] ?? DEFAULT_CONFIG;
+  const countryCode = TM_LEAGUE_TO_COUNTRY[config.tmLeague] ?? "fr";
+  return { name: `Championnat ${key}`, countryCode };
+}
+
 export function getLeagueConfig(championshipId: number | string | undefined): LeagueConfig {
   if (championshipId == null || championshipId === "") return DEFAULT_CONFIG;
   const key = String(championshipId).trim();

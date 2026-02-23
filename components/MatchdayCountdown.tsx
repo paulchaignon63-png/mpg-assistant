@@ -7,6 +7,8 @@ interface MatchdayCountdownProps {
   leagueName?: string;
   mpgNextRealGameWeekDate?: string;
   compact?: boolean;
+  showFullDate?: boolean;
+  variant?: "compact" | "default" | "dashboard" | "team" | "league";
 }
 
 interface BreakStatusData {
@@ -23,23 +25,56 @@ interface DeadlineData {
   breakStatus: BreakStatusData | null;
 }
 
-function formatCountdown(deadline: Date): string {
-  const now = new Date();
+interface CountdownParts {
+  days: number;
+  hours: number;
+  minutes: number;
+  seconds: number;
+  isExpired: boolean;
+}
+
+function getCountdownParts(deadline: Date, now: Date): CountdownParts {
   const diff = deadline.getTime() - now.getTime();
-
-  if (diff <= 0) return "Compos figées - en cours";
-
-  const days = Math.floor(diff / (24 * 60 * 60 * 1000));
-  const hours = Math.floor((diff % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
-  const minutes = Math.floor((diff % (60 * 60 * 1000)) / (60 * 1000));
-
-  if (days > 0) {
-    return `${days}j ${hours}h ${minutes}m`;
+  if (diff <= 0) {
+    return { days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: true };
   }
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  }
+  const totalSeconds = Math.floor(diff / 1000);
+  return {
+    days: Math.floor(totalSeconds / 86400),
+    hours: Math.floor((totalSeconds % 86400) / 3600),
+    minutes: Math.floor((totalSeconds % 3600) / 60),
+    seconds: totalSeconds % 60,
+    isExpired: false,
+  };
+}
+
+function formatCountdown(deadline: Date, now: Date): string {
+  const { days, hours, minutes, isExpired } = getCountdownParts(deadline, now);
+  if (isExpired) return "Compos figées - en cours";
+  if (days > 0) return `${days}j ${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
   return `${minutes}m`;
+}
+
+/** Format avec secondes pour un affichage qui défile en temps réel */
+function formatCountdownWithSeconds(deadline: Date, now: Date): string {
+  const { days, hours, minutes, seconds, isExpired } = getCountdownParts(deadline, now);
+  if (isExpired) return "Compos figées - en cours";
+  if (days > 0) return `${days}j ${hours}h ${minutes}m ${seconds}s`;
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+/** Couleur du compte à rebours selon le temps restant avant le deadline */
+function getCountdownColorClass(deadline: Date, now: Date): string {
+  const diffMs = deadline.getTime() - now.getTime();
+  if (diffMs <= 0) return "text-amber-400/90"; // expiré
+  const hoursRemaining = diffMs / (1000 * 60 * 60);
+  if (hoursRemaining >= 24) return "text-emerald-400";
+  if (hoursRemaining >= 12) return "text-yellow-400";
+  if (hoursRemaining >= 2) return "text-orange-400";
+  return "text-red-400";
 }
 
 function formatDeadlineShort(deadline: Date): string {
@@ -50,11 +85,25 @@ function formatDeadlineShort(deadline: Date): string {
   return `${dayName} ${hours}h${minutes}`;
 }
 
+function formatDeadlineFull(deadline: Date): string {
+  const str = deadline.toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
 export function MatchdayCountdown({
   championshipId,
   leagueName,
   mpgNextRealGameWeekDate,
   compact = false,
+  showFullDate = false,
+  variant = "default",
 }: MatchdayCountdownProps) {
   const [data, setData] = useState<DeadlineData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -91,15 +140,16 @@ export function MatchdayCountdown({
 
     fetchDeadline();
 
+    const tickInterval = ["dashboard", "team", "league"].includes(variant ?? "") ? 1000 : 60 * 1000;
     const interval = setInterval(() => {
       setNow(new Date());
-    }, 60 * 1000);
+    }, tickInterval);
 
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [championshipId, mpgNextRealGameWeekDate]);
+  }, [championshipId, mpgNextRealGameWeekDate, variant]);
 
   if (loading) {
     return (
@@ -127,21 +177,95 @@ export function MatchdayCountdown({
   }
 
   const deadlineDate = new Date(data.deadline);
-  const countdown = formatCountdown(deadlineDate);
+  const matchdayDate = data.firstMatchDate
+    ? new Date(data.firstMatchDate)
+    : deadlineDate;
+  const countdown = formatCountdown(deadlineDate, now);
   const short = formatDeadlineShort(deadlineDate);
+
+  if (variant === "dashboard") {
+    const parts = getCountdownParts(deadlineDate, now);
+    if (parts.isExpired) {
+      return (
+        <span className="text-xl font-semibold text-amber-400/90">
+          Compos figées - en cours
+        </span>
+      );
+    }
+    return (
+      <div className="flex flex-wrap items-baseline gap-3 sm:gap-4">
+        {parts.days > 0 && (
+          <div className="flex flex-col items-center">
+            <span className="text-4xl font-bold tabular-nums text-emerald-400 sm:text-5xl">
+              {parts.days}
+            </span>
+            <span className="text-xs uppercase tracking-wider text-[#9CA3AF]">jours</span>
+          </div>
+        )}
+        <div className="flex flex-col items-center">
+          <span className="text-4xl font-bold tabular-nums text-emerald-400 sm:text-5xl">
+            {String(parts.hours).padStart(2, "0")}
+          </span>
+          <span className="text-xs uppercase tracking-wider text-[#9CA3AF]">heures</span>
+        </div>
+        <div className="flex flex-col items-center">
+          <span className="text-4xl font-bold tabular-nums text-emerald-400 sm:text-5xl">
+            {String(parts.minutes).padStart(2, "0")}
+          </span>
+          <span className="text-xs uppercase tracking-wider text-[#9CA3AF]">minutes</span>
+        </div>
+        <div className="flex flex-col items-center">
+          <span className="text-4xl font-bold tabular-nums text-emerald-400 sm:text-5xl">
+            {String(parts.seconds).padStart(2, "0")}
+          </span>
+          <span className="text-xs uppercase tracking-wider text-[#9CA3AF]">secondes</span>
+        </div>
+        {data.gameWeek != null && (
+          <span className="self-end text-sm text-[#9CA3AF]">Journée {data.gameWeek}</span>
+        )}
+      </div>
+    );
+  }
 
   if (countdown === "Compos figées - en cours") {
     return (
-      <span className="text-xs text-amber-400/90">
+      <span className={variant === "team" ? "text-lg text-amber-400/90" : "text-xs text-amber-400/90"}>
         Compos figées - en cours
       </span>
     );
   }
 
-  if (compact) {
+  if (variant === "team") {
+    const colorClass = getCountdownColorClass(deadlineDate, now);
+    const countdownText = formatCountdownWithSeconds(deadlineDate, now);
     return (
-      <span className="text-xs text-emerald-400/90" title={`Compo ferme ${short}`}>
-        {short}
+      <span className="text-lg text-[#F9FAFB]">
+        Compo ferme dans <strong className={`tabular-nums ${colorClass}`}>{countdownText}</strong>
+        {data.gameWeek != null && (
+          <span className={`ml-1 ${colorClass} opacity-90`}>(J{data.gameWeek})</span>
+        )}
+      </span>
+    );
+  }
+
+  if (variant === "league") {
+    const colorClass = getCountdownColorClass(deadlineDate, now);
+    const countdownText = formatCountdownWithSeconds(deadlineDate, now);
+    return (
+      <span className="text-xs text-[#9CA3AF]">
+        Compo ferme dans <strong className={`tabular-nums ${colorClass}`}>{countdownText}</strong>
+        {data.gameWeek != null && (
+          <span className={`ml-1 ${colorClass} opacity-90`}>(J{data.gameWeek})</span>
+        )}
+      </span>
+    );
+  }
+
+  if (compact) {
+    const displayText = showFullDate ? formatDeadlineFull(matchdayDate) : short;
+    return (
+      <span className="text-xs text-emerald-400/90" title={showFullDate ? undefined : `Compo ferme ${short}`}>
+        {displayText}
       </span>
     );
   }
