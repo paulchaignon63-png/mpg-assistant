@@ -131,6 +131,19 @@ export default function TeamPage({
 
   async function handleFormationChange(newFormation: number) {
     const prev = selectedFormation;
+    // #region agent log
+    fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        location: "equipe/page.tsx:handleFormationChange",
+        message: "formation change requested",
+        data: { newFormation, prev, teamId, hasTeamId: !!teamId },
+        timestamp: Date.now(),
+        hypothesisId: "H2,H4",
+      }),
+    }).catch(() => {});
+    // #endregion
     setSelectedFormation(newFormation);
     setFormationLoading(true);
     setError("");
@@ -157,6 +170,29 @@ export default function TeamPage({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Erreur");
+      // #region agent log
+      const recCount = (data.recommended ?? []).length;
+      const byPos = { G: 0, D: 0, M: 0, A: 0 };
+      for (const p of data.recommended ?? []) {
+        if (p?.position && p.position in byPos) byPos[p.position]++;
+      }
+      fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          location: "equipe/page.tsx:handleFormationChange:response",
+          message: "API response received",
+          data: {
+            dataFormation: data.formation,
+            requestedFormation: newFormation,
+            recommendedCount: recCount,
+            byPos,
+          },
+          timestamp: Date.now(),
+          hypothesisId: "H1,H3,H5",
+        }),
+      }).catch(() => {});
+      // #endregion
       setRecommended(data.recommended ?? []);
       setSubstitutes(data.substitutes ?? { G: [], D: [], M: [], A: [] });
       const usedForm = data.formation ?? newFormation;
@@ -322,12 +358,12 @@ export default function TeamPage({
           </p>
         </div>
 
-        <aside className="sticky top-4 shrink-0 lg:w-96 self-start">
-          <div className="rounded-xl border border-[#1F4641] bg-[#0F2F2B] p-4">
-            <h3 className="mb-2 text-sm font-semibold text-emerald-400">
+        <aside className="sticky top-4 shrink-0 lg:w-56 xl:w-64 self-start">
+          <div className="rounded-xl border border-[#1F4641] bg-[#0F2F2B] p-3">
+            <h3 className="mb-1.5 text-xs font-semibold text-emerald-400">
               Comment est calculé le score reco ?
             </h3>
-            <p className="text-sm leading-relaxed text-[#9CA3AF]">
+            <p className="text-xs leading-relaxed text-[#9CA3AF]">
               Notre score combine la forme récente (5 derniers matchs), la
               régularité, les buts et passes selon le poste, et la difficulté du
               prochain adversaire. Les joueurs blessés ou incertains sont exclus
