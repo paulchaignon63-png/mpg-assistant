@@ -170,29 +170,6 @@ export default function TeamPage({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Erreur");
-      // #region agent log
-      const recCount = (data.recommended ?? []).length;
-      const byPos = { G: 0, D: 0, M: 0, A: 0 };
-      for (const p of data.recommended ?? []) {
-        if (p?.position && p.position in byPos) byPos[p.position]++;
-      }
-      fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          location: "equipe/page.tsx:handleFormationChange:response",
-          message: "API response received",
-          data: {
-            dataFormation: data.formation,
-            requestedFormation: newFormation,
-            recommendedCount: recCount,
-            byPos,
-          },
-          timestamp: Date.now(),
-          hypothesisId: "H1,H3,H5",
-        }),
-      }).catch(() => {});
-      // #endregion
       setRecommended(data.recommended ?? []);
       setSubstitutes(data.substitutes ?? { G: [], D: [], M: [], A: [] });
       const usedForm = data.formation ?? newFormation;
