@@ -189,7 +189,33 @@ export async function POST(request: NextRequest) {
     ]);
 
     const coachFormation = coach as { matchTeamFormation?: { composition?: number } } | null;
-    const form = coachFormation?.matchTeamFormation?.composition ?? formation;
+    // Utiliser la formation demandée par l'utilisateur (dropdown), pas celle du coach MPG.
+    // Le coach MPG sert uniquement de fallback si formation non fournie (chargement initial).
+    const form = formation;
+
+    // #region agent log
+    const formationLog = {
+      location: "recommendations/route.ts:formation",
+      message: "formation used (post-fix: always request)",
+      data: {
+        formationRequested: formation,
+        coachComposition: coachFormation?.matchTeamFormation?.composition,
+        formUsed: form,
+        runId: "post-fix",
+      },
+      timestamp: Date.now(),
+      hypothesisId: "H1",
+    };
+    fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(formationLog),
+    }).catch(() => {});
+    if (process.env.NODE_ENV === "development") {
+      // eslint-disable-next-line no-console
+      console.log("[DEBUG formation]", JSON.stringify(formationLog.data));
+    }
+    // #endregion
 
     const squad = team.squad as Record<string, unknown> | undefined;
     let poolPlayers: PoolPlayer[] = pool?.poolPlayers ?? (pool as { players?: PoolPlayer[] })?.players ?? [];
@@ -241,6 +267,24 @@ export async function POST(request: NextRequest) {
         absenceExplainedPlayerNames: injuries.absenceExplainedPlayerNames,
       }
     );
+
+    // #region agent log
+    const byPosCount = { G: 0, D: 0, M: 0, A: 0 };
+    for (const p of recommended) {
+      if (p.position && p.position in byPosCount) byPosCount[p.position as keyof typeof byPosCount]++;
+    }
+    fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        location: "recommendations/route.ts:response",
+        message: "recommended lineup counts",
+        data: { formUsed: form, byPosCount, recommendedCount: recommended.length },
+        timestamp: Date.now(),
+        hypothesisId: "H1",
+      }),
+    }).catch(() => {});
+    // #endregion
 
     return NextResponse.json({
       team: team.name,
