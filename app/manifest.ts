@@ -2,6 +2,7 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
+    id: "le-11-parfait",
     name: "Le 11 parfait",
     short_name: "11 parfait",
     description: "Ton meilleur 11, chaque journée, sans prise de tête",
