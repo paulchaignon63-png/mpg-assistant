@@ -1,6 +1,8 @@
 /**
  * Client MPGStats - stats des joueurs (average, matchs, goals)
  * https://backend.mpgstats.fr - utilisé par mpg-coach-bot
+ *
+ * Fallback MPGStats = Transfermarkt + Sofascore (voir lib/sources-fallback.ts)
  */
 
 const MPGSTATS_URL = "https://backend.mpgstats.fr";
@@ -22,16 +24,23 @@ const CHAMPIONSHIP_TO_MPGSTATS: Record<string, string> = {
   LIGUE_SUPER: "Ligue-Super",
 };
 
+export interface MpgStatsMatch {
+  n?: number; // note du match
+  m?: number; // minutes
+  g?: number; // buts
+  D?: number; // numéro journée
+}
+
 export interface MpgStatsPlayer {
-  i: number; // id mpgstats
-  n: string; // lastName
-  f?: string | null; // firstName
-  fp?: string; // position (DC, MD, A, etc.)
-  c?: number; // clubId
+  i: number;
+  n: string;
+  f?: string | null;
+  fp?: string;
+  c?: number;
   s?: {
-    a?: number; // average
-    n?: number; // matchs
-    g?: number; // goals
+    a?: number;
+    n?: number;
+    g?: number;
     Sa?: number;
     Sn?: number;
     Sg?: number;
@@ -39,6 +48,7 @@ export interface MpgStatsPlayer {
     On?: number;
     Og?: number;
   };
+  p?: MpgStatsMatch[]; // historique matchs (récent en premier)
 }
 
 export interface MpgStatsChampionship {
@@ -55,6 +65,13 @@ export interface MpgStatsEnrichment {
   matchs: number;
   goals: number;
   position?: string;
+  averageLast5?: number;
+  momentum?: number;
+  assists?: number;
+  pctTitularisations?: number;
+  yellowCards?: number;
+  redCards?: number;
+  isSuspended?: boolean;
 }
 
 /**
@@ -76,15 +93,32 @@ export async function getMpgStatsPlayers(
   for (const p of players) {
     const stats = p.s;
     const position = p.fp;
+    const matches = p.p ?? [];
 
     const average = stats ? (stats.a ?? stats.Sa ?? stats.Oa ?? 0) : 0;
     const matchs = stats ? (stats.n ?? stats.Sn ?? stats.On ?? 0) : 0;
     const goals = stats ? (stats.g ?? stats.Sg ?? stats.Og ?? 0) : 0;
 
+    let averageLast5: number | undefined;
+    let momentum: number | undefined;
+    if (matches.length >= 5) {
+      const last5 = matches.slice(0, 5).map((m) => m.n ?? 0).filter((n) => n > 0);
+      averageLast5 = last5.length > 0 ? last5.reduce((a, b) => a + b, 0) / last5.length : undefined;
+    }
+    if (matches.length >= 6) {
+      const last3 = matches.slice(0, 3).map((m) => m.n ?? 0).filter((n) => n > 0);
+      const prev3 = matches.slice(3, 6).map((m) => m.n ?? 0).filter((n) => n > 0);
+      const avgLast3 = last3.length > 0 ? last3.reduce((a, b) => a + b, 0) / last3.length : 0;
+      const avgPrev3 = prev3.length > 0 ? prev3.reduce((a, b) => a + b, 0) / prev3.length : 0;
+      momentum = avgLast3 - avgPrev3;
+    }
+
     const name = [p.n, p.f].filter(Boolean).join(" ").trim() || p.n;
     if (name) {
       const entry: MpgStatsEnrichment = { average, matchs, goals };
       if (position) entry.position = position;
+      if (averageLast5 != null) entry.averageLast5 = averageLast5;
+      if (momentum != null) entry.momentum = momentum;
       map.set(normalizeName(name), entry);
       if (p.f) {
         map.set(normalizeName(`${p.f} ${p.n}`), entry);
@@ -92,6 +126,22 @@ export async function getMpgStatsPlayers(
     }
   }
   return map;
+}
+
+/**
+ * Récupère les stats avec fallback Transfermarkt + Sofascore si MPGStats échoue.
+ */
+export async function getMpgStatsPlayersWithFallback(
+  championshipId: number | string
+): Promise<Map<string, MpgStatsEnrichment>> {
+  try {
+    const map = await getMpgStatsPlayers(championshipId);
+    if (map.size > 0) return map;
+  } catch {
+    // MPGStats échoué, utiliser fallback
+  }
+  const { getFallbackPlayerStats } = await import("./fallback-stats-service");
+  return getFallbackPlayerStats(championshipId);
 }
 
 function normalizeName(name: string): string {

@@ -13,8 +13,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Fantasy Assistant MPG",
-  description: "Reçois le meilleur 11 pour ton équipe MPG chaque semaine",
+  title: "Le 11 parfait",
+  description: "Ton meilleur 11, chaque journée, sans prise de tête",
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({
@@ -23,9 +27,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="fr">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#0A1F1C] text-[#F9FAFB]`}
       >
         {children}
       </body>

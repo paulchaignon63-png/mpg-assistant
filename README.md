@@ -20,10 +20,10 @@ Ouvre [http://localhost:3000](http://localhost:3000).
 
 ## Configuration
 
-Crée un fichier `.env.local` si tu veux utiliser API-Football pour enrichir les données (blessures, etc.) :
+Crée un fichier `.env.local` si tu veux utiliser API-Football pour les blessures et le classement adversaire :
 
 ```
-NEXT_PUBLIC_API_FOOTBALL_KEY=ta_cle_api
+API_FOOTBALL_KEY=ta_cle_api
 ```
 
 ## Sécurité

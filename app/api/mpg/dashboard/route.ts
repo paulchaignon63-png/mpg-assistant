@@ -20,6 +20,14 @@ export async function GET(request: NextRequest) {
       ? [userId, `mpg_user_${userId.replace(/^mpg_user_/i, "")}`, userId.replace(/^mpg_user_/i, "")]
       : [];
 
+    // #region agent log
+    const sample = leagues.slice(0, 5).map((league: unknown) => {
+      const l = league as Record<string, unknown>;
+      return { name: l.name, status: l.status, mode: l.mode, finishedState: l.finishedState, keys: Object.keys(l), divisionId: l.divisionId };
+    });
+    fetch('http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/route.ts',message:'API raw leagues sample',data:{sample,count:leagues.length},timestamp:Date.now(),hypothesisId:'H4-H5'})}).catch(()=>{});
+    // #endregion
+
     const enriched = await Promise.all(
       leagues.map(async (league: unknown) => {
         const l = league as { divisionId?: string; leagueId?: string; name?: string; championshipId?: string; teamId?: string; [k: string]: unknown };
