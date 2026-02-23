@@ -126,7 +126,7 @@ export default function DashboardPage() {
         </div>
         <button
           onClick={handleLogout}
-          className="absolute right-0 top-2 rounded-lg border border-[#1F4641] px-4 py-2 text-sm text-[#9CA3AF] transition hover:border-[#1F4641] hover:bg-[#0F2F2B] hover:text-[#F9FAFB] sm:top-0"
+          className="rounded-lg border border-[#1F4641] px-4 py-2 text-sm text-[#9CA3AF] transition hover:border-[#1F4641] hover:bg-[#0F2F2B] hover:text-[#F9FAFB] sm:absolute sm:right-0 sm:top-0"
         >
           Déconnexion
         </button>
