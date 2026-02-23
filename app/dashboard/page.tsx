@@ -114,8 +114,9 @@ export default function DashboardPage() {
                   {content}
                 </Link>
               ) : (
-                <div key={divId || i} className="opacity-75 cursor-not-allowed" title="Impossible de récupérer l'équipe pour cette ligue">
+                <div key={divId || i} className="opacity-75 cursor-not-allowed" title="Équipe non trouvée. Vérifie que la ligue a démarré ou que tu as rejoint la division.">
                   {content}
+                  <p className="mt-2 text-xs text-amber-500/80">Équipe non disponible</p>
                 </div>
               );
             })}

@@ -42,11 +42,11 @@ const POSITION_COEFF: Record<Position, number> = {
 
 function getPositionFromMpg(position?: string): Position {
   if (!position) return "M";
-  const p = position.toUpperCase();
-  if (p === "G" || p === "GARDIEN") return "G";
-  if (p === "D" || p === "DEFENSEUR") return "D";
-  if (p === "M" || p === "MILIEU") return "M";
-  if (p === "A" || p === "ATTAQUANT") return "A";
+  const p = String(position).toUpperCase();
+  if (p === "G" || p === "GARDIEN" || p === "GK") return "G";
+  if (p.startsWith("D") || p === "DEFENSEUR" || p === "DC" || p === "DG" || p === "DD" || p === "DL" || p === "DR") return "D";
+  if (p.startsWith("M") || p === "MILIEU" || p === "MC" || p === "MG" || p === "MD" || p === "ML" || p === "MR") return "M";
+  if (p.startsWith("A") || p === "ATTAQUANT" || p === "AC" || p === "AG" || p === "AD" || p === "AL" || p === "AR") return "A";
   return "M";
 }
 
@@ -73,43 +73,104 @@ function extractPlayersFromSquad(
   const poolById = new Map(poolPlayers.map((p) => [p.id, p]));
   const players: EnrichedPlayer[] = [];
   const posMap: Record<string, Position> = {
+    g: "G",
+    G: "G",
     goalkeeper: "G",
     goalkeepers: "G",
+    gardien: "G",
+    d: "D",
+    D: "D",
     defender: "D",
     defenders: "D",
+    defenseurs: "D",
+    m: "M",
+    M: "M",
     midfielder: "M",
     midfielders: "M",
+    milieux: "M",
+    a: "A",
+    A: "A",
     attacker: "A",
     attackers: "A",
+    attaquants: "A",
   };
 
-  // Structure 1: squad = { playerId: { pricePaid?, ... } } (MPG API)
+  // Index pool par id, et variantes (mpg_player_123, mpg_championship_player_123, 123)
+  const poolByNormalizedId = new Map<string, PoolPlayer>();
+  for (const p of poolPlayers) {
+    if (p.id) {
+      poolByNormalizedId.set(p.id, p);
+      const bare1 = p.id.replace(/^mpg_player_/i, "");
+      const bare2 = p.id.replace(/^mpg_championship_player_/i, "");
+      if (bare1 !== p.id) poolByNormalizedId.set(bare1, p);
+      if (bare2 !== p.id) poolByNormalizedId.set(bare2, p);
+    }
+  }
+
+  function getFromPool(id: string): PoolPlayer | undefined {
+    return (
+      poolById.get(id) ??
+      poolByNormalizedId.get(id) ??
+      poolByNormalizedId.get(id.replace(/^mpg_player_/i, "")) ??
+      poolByNormalizedId.get(id.replace(/^mpg_championship_player_/i, ""))
+    );
+  }
+
+  // Structure 1: squad = { playerId: { pricePaid?, id?, ... } } (MPG API)
   for (const [key, value] of Object.entries(squad)) {
-    const poolPlayer = poolById.get(key);
-    if (poolPlayer) {
-      const posStr = typeof poolPlayer.position === "object" ? poolPlayer.position?.toString?.() : String(poolPlayer.position ?? "");
+    const poolPlayer = getFromPool(key);
+    const valueObj = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+    const altId = valueObj && typeof valueObj.id === "string" ? valueObj.id : key;
+    const poolPlayer2 = !poolPlayer && altId !== key ? getFromPool(altId) : poolPlayer;
+    const resolved = poolPlayer ?? poolPlayer2;
+
+    if (resolved) {
+      const posStr = typeof resolved.position === "object" ? resolved.position?.toString?.() : String(resolved.position ?? "");
       const pos = getPositionFromMpg(posStr);
-      const name = poolPlayer.name ?? [poolPlayer.lastName, poolPlayer.firstName].filter(Boolean).join(" ").trim();
+      const name = resolved.name ?? [resolved.lastName, resolved.firstName].filter(Boolean).join(" ").trim();
       players.push({
-        ...poolPlayer,
-        name: name || poolPlayer.name,
+        ...resolved,
+        ...(valueObj || {}),
+        name: name || resolved.name,
         position: pos,
         recommendationScore: 0,
       });
       continue;
     }
 
-    // Structure 2: squad = { position: [players] }
-    const pos = posMap[key.toLowerCase?.() ?? key] ?? "M";
-    const list = Array.isArray(value) ? value : [];
-    for (const p of list) {
-      const mp = p as MpgPlayer & { position?: string; id?: string };
-      const fromPool = mp.id ? poolById.get(mp.id) : null;
-      const merged = fromPool ? { ...fromPool, ...mp } : mp;
-      const posStr = typeof merged.position === "object" ? (merged.position as { toString?: () => string })?.toString?.() : String(merged.position ?? "");
-      const posFromPlayer = posStr ? getPositionFromMpg(posStr) : pos;
+    // Structure 1b: value is full player object (id, position, etc.) - use it even without pool
+    if (valueObj && (valueObj.id || valueObj.position || valueObj.name || valueObj.lastName)) {
+      const posStr = String(valueObj.position ?? "");
+      const pos = getPositionFromMpg(posStr);
+      const nameRaw = valueObj.name ?? [valueObj.lastName, valueObj.firstName].filter(Boolean).join(" ").trim();
+      const name = String(nameRaw || "");
+      const merged = getFromPool(String(valueObj.id ?? key)) ?? (valueObj as PoolPlayer);
       players.push({
         ...merged,
+        ...valueObj,
+        name: name || (merged as PoolPlayer).name,
+        position: pos,
+        recommendationScore: 0,
+      });
+      continue;
+    }
+
+    // Structure 2: squad = { position: [players ou IDs] }
+    const pos = posMap[(key as string).toLowerCase?.() ?? key] ?? "M";
+    const list = Array.isArray(value) ? value : [];
+    for (const p of list) {
+      const playerId = typeof p === "string" ? p : (p as { id?: string })?.id;
+      const mp = typeof p === "object" && p !== null ? (p as MpgPlayer & { position?: string; id?: string }) : null;
+      const fromPool = playerId ? getFromPool(playerId) : null;
+      const merged = fromPool ? { ...fromPool, ...mp } : mp;
+      if (!merged) continue;
+      const posStr = typeof merged.position === "object" ? (merged.position as { toString?: () => string })?.toString?.() : String(merged.position ?? "");
+      const posFromPlayer = posStr ? getPositionFromMpg(posStr) : pos;
+      const m = merged as { name?: string; firstName?: string; lastName?: string };
+      const name = m.name ?? [m.lastName, m.firstName].filter(Boolean).join(" ").trim();
+      players.push({
+        ...merged,
+        name: name || merged.name,
         position: posFromPlayer,
         recommendationScore: 0,
       });

@@ -14,7 +14,7 @@ function normalizeName(name: string): string {
 
 function enrichPoolWithStats(
   poolPlayers: PoolPlayer[],
-  statsMap: Map<string, { average: number; matchs: number; goals: number }>
+  statsMap: Map<string, { average: number; matchs: number; goals: number; position?: string }>
 ): PoolPlayer[] {
   return poolPlayers.map((p) => {
     const name = p.name ?? [p.lastName, p.firstName].filter(Boolean).join(" ").trim();
@@ -22,12 +22,14 @@ function enrichPoolWithStats(
     const key = normalizeName(name);
     const stats = statsMap.get(key);
     if (!stats) return p;
-    return {
+    const updated: PoolPlayer = {
       ...p,
       average: stats.average,
       matchs: stats.matchs,
       goals: stats.goals,
     };
+    if (stats.position) updated.position = stats.position;
+    return updated;
   });
 }
 
@@ -59,6 +61,7 @@ export async function POST(request: NextRequest) {
     const squad = team.squad as Record<string, unknown> | undefined;
     let poolPlayers: PoolPlayer[] = pool?.poolPlayers ?? (pool as { players?: PoolPlayer[] })?.players ?? [];
     poolPlayers = enrichPoolWithStats(poolPlayers, statsMap);
+
     const recommended = getRecommendedTeam(squad, form, [], poolPlayers);
 
     return NextResponse.json({

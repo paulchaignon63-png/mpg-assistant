@@ -62,8 +62,8 @@ function normalizePoolPlayer(p: Record<string, unknown>): {
   const average = typeof p.average === "number" ? p.average : (typeof p.a === "number" ? p.a : (s && typeof s.a === "number" ? s.a : undefined));
   const matchs = typeof p.matchs === "number" ? p.matchs : (s && typeof s.n === "number" ? s.n : undefined);
   const goals = typeof p.goals === "number" ? p.goals : (typeof p.g === "number" ? p.g : (s && typeof s.g === "number" ? s.g : undefined));
-  const clubId = String(p.clubId ?? p.c ?? "").trim() || undefined;
-  const clubName = String(p.clubName ?? "").trim() || undefined;
+  const clubId = (String(p.clubId ?? p.c ?? "").trim()) || undefined;
+  const clubName = (String(p.clubName ?? "").trim()) || undefined;
   return {
     id,
     name,

@@ -50,12 +50,20 @@ function getLeagueSlug(championshipId: number | string): string {
   return CHAMPIONSHIP_TO_MPGSTATS[key] ?? "Ligue-1";
 }
 
+export interface MpgStatsEnrichment {
+  average: number;
+  matchs: number;
+  goals: number;
+  position?: string;
+}
+
 /**
- * Récupère les stats du championnat (average, matchs, goals par joueur)
+ * Récupère les stats du championnat (average, matchs, goals, position par joueur)
+ * La position vient de mpgstats (fp: DC, MD, A, etc.) car le pool MPG ne l'inclut pas
  */
 export async function getMpgStatsPlayers(
   championshipId: number | string
-): Promise<Map<string, { average: number; matchs: number; goals: number }>> {
+): Promise<Map<string, MpgStatsEnrichment>> {
   const slug = getLeagueSlug(championshipId);
   const url = `${MPGSTATS_URL}/leagues/${slug}_v2.json`;
   const res = await fetch(url);
@@ -63,23 +71,23 @@ export async function getMpgStatsPlayers(
 
   const data = (await res.json()) as MpgStatsChampionship;
   const players = data.p ?? [];
-  const map = new Map<string, { average: number; matchs: number; goals: number }>();
+  const map = new Map<string, MpgStatsEnrichment>();
 
   for (const p of players) {
     const stats = p.s;
-    if (!stats) continue;
+    const position = p.fp;
 
-    // a = average, n = matchs, g = goals (saison en cours)
-    const average = stats.a ?? stats.Sa ?? stats.Oa ?? 0;
-    const matchs = stats.n ?? stats.Sn ?? stats.On ?? 0;
-    const goals = stats.g ?? stats.Sg ?? stats.Og ?? 0;
+    const average = stats ? (stats.a ?? stats.Sa ?? stats.Oa ?? 0) : 0;
+    const matchs = stats ? (stats.n ?? stats.Sn ?? stats.On ?? 0) : 0;
+    const goals = stats ? (stats.g ?? stats.Sg ?? stats.Og ?? 0) : 0;
 
     const name = [p.n, p.f].filter(Boolean).join(" ").trim() || p.n;
     if (name) {
-      map.set(normalizeName(name), { average, matchs, goals });
-      // aussi indexer "Nom Prénom" et "Prénom Nom" pour le matching
+      const entry: MpgStatsEnrichment = { average, matchs, goals };
+      if (position) entry.position = position;
+      map.set(normalizeName(name), entry);
       if (p.f) {
-        map.set(normalizeName(`${p.f} ${p.n}`), { average, matchs, goals });
+        map.set(normalizeName(`${p.f} ${p.n}`), entry);
       }
     }
   }
