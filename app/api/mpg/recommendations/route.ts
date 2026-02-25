@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createMpgClient } from "@/lib/mpg-client";
 import { getMpgStatsPlayersWithFallback, type MpgStatsEnrichment } from "@/lib/mpgstats-client";
-import { getSofascorePlayerStats } from "@/lib/sofascore-client";
+import { getSofascorePlayerDetailedStats } from "@/lib/sofascore-client";
 import { scrapeTransfermarktSuspensions } from "@/lib/scrapers/sources/transfermarkt";
 import { fetchEnrichedInjuries } from "@/lib/scraped-injuries-service";
 import {
@@ -10,8 +10,12 @@ import {
   type OpponentRankData,
 } from "@/lib/opponent-rank-service";
 import { isPlayerInInjuryList, isPlayerInjuryMatchWithContext } from "@/lib/injuries-service";
-import { fetchSofascoreStandingsAndFixtures } from "@/lib/sofascore-client";
+import { fetchSofascoreStandingsAndFixtures, getNextMatchdayFirstMatch } from "@/lib/sofascore-client";
 import { getRecommendedTeamWithSubstitutes, type PoolPlayer } from "@/lib/recommendation";
+import { getTeamFormForClubs } from "@/lib/team-form-service";
+import { getRoundToOpponentRankMap } from "@/lib/match-opponent-rank-service";
+import { getTransferredRecentlyPlayerNames } from "@/lib/transfer-recency-service";
+import { aggregateScrapedData } from "@/lib/scrapers";
 
 /** Fallback API-Football = Sofascore (voir lib/sources-fallback.ts) */
 async function fetchOpponentData(
@@ -33,12 +37,15 @@ async function fetchOpponentData(
       return {
         rankByClub: data.rankByClub,
         totalTeams: data.totalTeams,
+        isHomeByClub: data.isHomeByClub,
+        teamStatsByClub: data.teamStatsByClub,
+        clubByRank: data.clubByRank,
       };
   } catch (err) {
     if (process.env.NODE_ENV === "development")
       console.warn("[Sofascore] fetchOpponentData failed:", err);
   }
-  return { rankByClub: new Map(), totalTeams: 18 };
+  return { rankByClub: new Map(), totalTeams: 18 } as OpponentRankData;
 }
 
 function normalizeName(name: string): string {
@@ -50,13 +57,49 @@ function normalizeName(name: string): string {
     .trim();
 }
 
+interface EnrichPoolOptions {
+  statsMap: Map<string, MpgStatsEnrichment>;
+  sofascoreMap?: Map<string, { pctTitularisations?: number; yellowCards?: number; redCards?: number; assists?: number; xG?: number; tackles?: number; interceptions?: number; cleanSheets?: number }>;
+  suspendedNames?: Set<string>;
+  opponentRankMap?: Map<string, number>;
+  isHomeByClub?: Map<string, boolean>;
+  teamStatsByClub?: Map<string, { goalsFor: number; goalsAgainst: number }>;
+  clubByRank?: Map<number, string>;
+  teamFormMap?: Map<string, { winsLast5: number; drawsLast5?: number; lossesLast5?: number }>;
+  transferredRecentlySet?: Set<string>;
+  injuryReturnByPlayer?: Map<string, string>;
+  suspensionReturnByPlayer?: Map<string, string>;
+  marketValueByPlayer?: Map<string, string>;
+}
+
 function enrichPoolWithStats(
   poolPlayers: PoolPlayer[],
-  statsMap: Map<string, MpgStatsEnrichment>,
-  sofascoreMap?: Map<string, { pctTitularisations?: number; yellowCards?: number; redCards?: number; assists?: number }>,
-  suspendedNames?: Set<string>,
-  opponentRankMap?: Map<string, number>
+  options: EnrichPoolOptions
 ): PoolPlayer[] {
+  const {
+    statsMap,
+    sofascoreMap,
+    suspendedNames,
+    opponentRankMap,
+    isHomeByClub,
+    teamStatsByClub,
+    clubByRank,
+    teamFormMap,
+    transferredRecentlySet,
+    injuryReturnByPlayer,
+    suspensionReturnByPlayer,
+    marketValueByPlayer,
+  } = options;
+
+  const normClub = (s: string) =>
+    s
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "")
+      .replace(/\s+/g, " ")
+      .replace(/[^a-z0-9\s]/g, "")
+      .trim();
+
   return poolPlayers.map((p) => {
     const name = p.name ?? [p.lastName, p.firstName].filter(Boolean).join(" ").trim();
     if (!name) return p;
@@ -73,11 +116,21 @@ function enrichPoolWithStats(
           ...(stats.position && { position: stats.position }),
           ...(stats.averageLast5 != null && { averageLast5: stats.averageLast5 }),
           ...(stats.momentum != null && { momentum: stats.momentum }),
+          ...(stats.last5Notes != null && { last5Notes: stats.last5Notes }),
+          ...(stats.last5Minutes != null && { last5Minutes: stats.last5Minutes }),
+          ...(stats.last5OpponentRounds != null && { last5OpponentRounds: stats.last5OpponentRounds }),
+          ...(stats.last5Minutes != null && {
+            matchsLast15Days: stats.last5Minutes.filter((m) => (m ?? 0) > 0).length,
+          }),
           assists: stats.assists ?? sofascore?.assists ?? p.assists,
           pctTitularisations: stats.pctTitularisations ?? sofascore?.pctTitularisations ?? p.pctTitularisations,
           yellowCards: stats.yellowCards ?? sofascore?.yellowCards ?? p.yellowCards,
           redCards: stats.redCards ?? sofascore?.redCards ?? p.redCards,
           isSuspended: stats.isSuspended ?? (suspendedNames?.has(key) ? true : undefined) ?? p.isSuspended,
+          xG: sofascore?.xG ?? (p as { xG?: number }).xG,
+          tackles: sofascore?.tackles ?? (p as { tackles?: number }).tackles,
+          interceptions: sofascore?.interceptions ?? (p as { interceptions?: number }).interceptions,
+          cleanSheets: sofascore?.cleanSheets ?? (p as { cleanSheets?: number }).cleanSheets,
         }
       : {
           ...p,
@@ -85,6 +138,10 @@ function enrichPoolWithStats(
           ...(sofascore?.pctTitularisations != null && { pctTitularisations: sofascore.pctTitularisations }),
           ...(sofascore?.yellowCards != null && { yellowCards: sofascore.yellowCards }),
           ...(sofascore?.redCards != null && { redCards: sofascore.redCards }),
+          ...(sofascore?.xG != null && { xG: sofascore.xG }),
+          ...(sofascore?.tackles != null && { tackles: sofascore.tackles }),
+          ...(sofascore?.interceptions != null && { interceptions: sofascore.interceptions }),
+          ...(sofascore?.cleanSheets != null && { cleanSheets: sofascore.cleanSheets }),
           ...(suspendedNames?.has(key) && { isSuspended: true }),
         };
 
@@ -92,8 +149,50 @@ function enrichPoolWithStats(
       const rank = getOpponentRankForClub(p.clubName, opponentRankMap);
       if (rank != null) updated.nextOpponentRank = rank;
     }
+    if (isHomeByClub?.size && p.clubName) {
+      const clubNorm = normClub(p.clubName);
+      const isHome = isHomeByClub.get(clubNorm);
+      if (isHome !== undefined) (updated as { isHome?: boolean }).isHome = isHome;
+      for (const [k, v] of isHomeByClub) {
+        if (k.includes(clubNorm) || clubNorm.includes(k)) {
+          (updated as { isHome?: boolean }).isHome = v;
+          break;
+        }
+      }
+    }
+    if (teamFormMap?.size && p.clubName) {
+      for (const [club, form] of teamFormMap) {
+        if (namesMatchClub(p.clubName, club)) {
+          (updated as { teamFormWinsLast5?: number }).teamFormWinsLast5 = form.winsLast5;
+          break;
+        }
+      }
+    }
+    if (opponentRankMap && teamStatsByClub?.size && clubByRank?.size && p.clubName) {
+      const oppRank = getOpponentRankForClub(p.clubName, opponentRankMap);
+      if (oppRank != null) {
+        const nextOppNorm = clubByRank.get(oppRank);
+        if (nextOppNorm && teamStatsByClub.has(nextOppNorm)) {
+          const oppStats = teamStatsByClub.get(nextOppNorm)!;
+          (updated as { opponentGoalsFor?: number }).opponentGoalsFor = oppStats.goalsFor;
+          (updated as { opponentGoalsAgainst?: number }).opponentGoalsAgainst = oppStats.goalsAgainst;
+        }
+      }
+    }
+    if (transferredRecentlySet?.has(key)) (updated as { transferredRecently?: boolean }).transferredRecently = true;
+    if (injuryReturnByPlayer?.has(key)) (updated as { injuryReturnDate?: string }).injuryReturnDate = injuryReturnByPlayer.get(key);
+    if (suspensionReturnByPlayer?.has(key)) (updated as { suspensionReturnDate?: string }).suspensionReturnDate = suspensionReturnByPlayer.get(key);
+    if (marketValueByPlayer?.has(key)) (updated as { marketValue?: string }).marketValue = marketValueByPlayer.get(key);
+
     return updated;
   });
+}
+
+function namesMatchClub(a: string | undefined, b: string): boolean {
+  if (!a) return false;
+  const na = a.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "").replace(/\s+/g, " ").replace(/[^a-z0-9\s]/g, "").trim();
+  const nb = b.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "").replace(/\s+/g, " ").replace(/[^a-z0-9\s]/g, "").trim();
+  return na === nb || na.includes(nb) || nb.includes(na);
 }
 
 export async function POST(request: NextRequest) {
@@ -156,29 +255,31 @@ export async function POST(request: NextRequest) {
       console.log("[Le 11 parfait] championshipId:", championshipId, "→ effectiveChampId:", effectiveChampId, "| apiKey:", apiKey ? "OK" : "MANQUANTE");
     }
 
-    const [team, pool, coach, division, statsMap, sofascoreMap, suspensions, injuries, opponentData] = await Promise.all([
+    const [
+      team,
+      pool,
+      coach,
+      division,
+      statsMap,
+      sofascoreMap,
+      suspensionsFull,
+      injuries,
+      opponentData,
+      roundOpponentRankMap,
+      scrapedData,
+      nextMatchDate,
+    ] = await Promise.all([
       client.getTeam(teamId),
       poolChampId ? client.getPoolPlayers(poolChampId).catch(() => null) : null,
       divisionId ? client.getCoach(divisionId).catch(() => null) : null,
       divisionId ? client.getDivision(divisionId).catch(() => null) : null,
       effectiveChampId ? getMpgStatsPlayersWithFallback(effectiveChampId) : Promise.resolve(new Map()),
       effectiveChampId
-        ? getSofascorePlayerStats(effectiveChampId).catch(() => new Map())
+        ? getSofascorePlayerDetailedStats(effectiveChampId).catch(() => new Map())
         : Promise.resolve(new Map()),
       effectiveChampId
-        ? scrapeTransfermarktSuspensions({ championshipId: effectiveChampId }).then((s) => {
-            const set = new Set<string>();
-            const norm = (n: string) =>
-              n
-                .toLowerCase()
-                .normalize("NFD")
-                .replace(/\p{Diacritic}/gu, "")
-                .replace(/\s+/g, " ")
-                .trim();
-            for (const x of s) set.add(norm(x.playerName));
-            return set;
-          })
-        : Promise.resolve(new Set<string>()),
+        ? scrapeTransfermarktSuspensions({ championshipId: effectiveChampId }).catch(() => [])
+        : Promise.resolve([]),
       effectiveChampId
         ? fetchEnrichedInjuries(effectiveChampId, apiKey, {
             enableScraping: process.env.ENABLE_SCRAPED_INJURIES !== "0",
@@ -187,6 +288,22 @@ export async function POST(request: NextRequest) {
       effectiveChampId
         ? fetchOpponentData(effectiveChampId, apiKey, willCallApiFootball)
         : { rankByClub: new Map(), totalTeams: 18 },
+      effectiveChampId
+        ? getRoundToOpponentRankMap(effectiveChampId).catch(() => new Map())
+        : Promise.resolve(new Map()),
+      effectiveChampId
+        ? aggregateScrapedData({ championshipId: effectiveChampId, transfermarkt: true }).catch(() => ({
+            injuries: [],
+            transfers: [],
+            news: [],
+            scrapedAt: "",
+            sourcesOk: [],
+            sourcesFailed: [],
+          }))
+        : Promise.resolve({ injuries: [], transfers: [], news: [], scrapedAt: "", sourcesOk: [], sourcesFailed: [] }),
+      effectiveChampId
+        ? getNextMatchdayFirstMatch(effectiveChampId).catch(() => null)
+        : Promise.resolve(null),
     ]);
 
     const coachFormation = coach as { matchTeamFormation?: { composition?: number } } | null;
@@ -218,15 +335,72 @@ export async function POST(request: NextRequest) {
     }
     // #endregion
 
+    const normForMatch = (s: string) =>
+      s
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/\p{Diacritic}/gu, "")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const suspendedNames = new Set<string>();
+    const suspensionReturnByPlayer = new Map<string, string>();
+    for (const s of suspensionsFull) {
+      const k = normForMatch(s.playerName);
+      suspendedNames.add(k);
+      if (s.returnDate) suspensionReturnByPlayer.set(k, s.returnDate);
+    }
+
+    const injuryReturnByPlayer = new Map<string, string>();
+    for (const it of injuries.injuredItems ?? []) {
+      if (it.returnDate) injuryReturnByPlayer.set(normForMatch(it.playerName), it.returnDate);
+    }
+    for (const it of injuries.doubtfulItems ?? []) {
+      if (it.returnDate && !injuryReturnByPlayer.has(normForMatch(it.playerName))) {
+        injuryReturnByPlayer.set(normForMatch(it.playerName), it.returnDate);
+      }
+    }
+
+    const marketValueByPlayer = new Map<string, string>();
+    for (const it of scrapedData.injuries ?? []) {
+      if (it.marketValue) marketValueByPlayer.set(normForMatch(it.playerName), it.marketValue);
+    }
+    for (const it of scrapedData.transfers ?? []) {
+      if (it.marketValue && !marketValueByPlayer.has(normForMatch(it.playerName))) {
+        marketValueByPlayer.set(normForMatch(it.playerName), it.marketValue);
+      }
+    }
+
+    const transferredRecentlySet = getTransferredRecentlyPlayerNames(scrapedData.transfers ?? []);
+
+    const clubNamesFromPool = [
+      ...new Set(
+        (pool?.poolPlayers ?? (pool as { players?: PoolPlayer[] })?.players ?? [])
+          .map((p) => p.clubName)
+          .filter((c): c is string => !!c)
+      ),
+    ];
+    const teamFormMap =
+      effectiveChampId && clubNamesFromPool.length > 0
+        ? await getTeamFormForClubs(effectiveChampId, clubNamesFromPool).catch(() => new Map())
+        : new Map();
+
     const squad = team.squad as Record<string, unknown> | undefined;
     let poolPlayers: PoolPlayer[] = pool?.poolPlayers ?? (pool as { players?: PoolPlayer[] })?.players ?? [];
-    poolPlayers = enrichPoolWithStats(
-      poolPlayers,
+    poolPlayers = enrichPoolWithStats(poolPlayers, {
       statsMap,
       sofascoreMap,
-      suspensions,
-      opponentData.rankByClub
-    );
+      suspendedNames,
+      opponentRankMap: opponentData.rankByClub,
+      isHomeByClub: (opponentData as OpponentRankData).isHomeByClub,
+      teamStatsByClub: (opponentData as OpponentRankData).teamStatsByClub,
+      clubByRank: (opponentData as OpponentRankData).clubByRank,
+      teamFormMap,
+      transferredRecentlySet,
+      injuryReturnByPlayer,
+      suspensionReturnByPlayer,
+      marketValueByPlayer,
+    });
 
     const playersWithAdvRank = poolPlayers.filter((p) => p.nextOpponentRank != null).length;
     // #region agent log
@@ -237,8 +411,7 @@ export async function POST(request: NextRequest) {
     const scoreZeroReasons: Record<string, "injured" | "suspended" | "unknown"> = {};
     const isInSuspendedSet = (n: string) => {
       const nNorm = norm(n);
-      const last = nNorm.split(" ").pop() ?? "";
-      return Array.from(suspensions ?? []).some((s) => s === nNorm || s.includes(last) || nNorm.includes(s));
+      return suspendedNames.has(nNorm) || Array.from(suspendedNames).some((s) => s.includes(nNorm) || nNorm.includes(s));
     };
     for (const name of targetNames) {
       const poolPlayer = poolPlayers.find((p) => {
@@ -262,7 +435,7 @@ export async function POST(request: NextRequest) {
           injuredCount: injuredFull.length,
           injuredFull,
           injuredItemsNames: injuredItems.map((i) => i.playerName),
-          suspendedList: Array.from(suspensions ?? []),
+          suspendedList: Array.from(suspendedNames),
           scoreZeroReasons,
         },
         timestamp: Date.now(),
@@ -286,6 +459,10 @@ export async function POST(request: NextRequest) {
         injuredDoubtfulItems: injuries.doubtfulItems,
         totalTeams: opponentData.totalTeams,
         absenceExplainedPlayerNames: injuries.absenceExplainedPlayerNames,
+        nextMatchDate: nextMatchDate?.firstMatchTimestamp
+          ? new Date(nextMatchDate.firstMatchTimestamp * 1000)
+          : undefined,
+        roundOpponentRankMap: roundOpponentRankMap.size > 0 ? roundOpponentRankMap : undefined,
       }
     );
 

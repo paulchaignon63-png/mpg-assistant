@@ -76,6 +76,9 @@ function namesMatch(poolName: string, apiNameNormalized: string): boolean {
 export interface OpponentRankData {
   rankByClub: Map<string, number>;
   totalTeams: number;
+  isHomeByClub?: Map<string, boolean>;
+  teamStatsByClub?: Map<string, { goalsFor: number; goalsAgainst: number }>;
+  clubByRank?: Map<number, string>;
 }
 
 /**

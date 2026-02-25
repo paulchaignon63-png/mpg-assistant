@@ -47,8 +47,11 @@ function mergeInjuryLists(
   return merged;
 }
 
-function toInjuryItem(i: ScrapedInjury | { playerName: string; status: string; clubName?: string }): InjuryItemWithContext {
-  return { playerName: i.playerName, clubName: i.clubName };
+function toInjuryItem(i: ScrapedInjury | { playerName: string; status: string; clubName?: string; returnDate?: string; reason?: string }): InjuryItemWithContext {
+  const item: InjuryItemWithContext = { playerName: i.playerName, clubName: i.clubName };
+  if ("returnDate" in i && i.returnDate) item.returnDate = i.returnDate;
+  if ("reason" in i && i.reason) item.reason = i.reason;
+  return item;
 }
 
 /**

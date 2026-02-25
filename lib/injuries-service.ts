@@ -82,6 +82,8 @@ export function isPlayerInInjuryList(
 export interface InjuryItemWithContext {
   playerName: string;
   clubName?: string;
+  returnDate?: string;
+  reason?: string;
 }
 
 /** Match avec contextualisation : si injury et player ont un club, exiger la correspondance */

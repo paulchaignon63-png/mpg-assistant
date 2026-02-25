@@ -72,6 +72,12 @@ export interface MpgStatsEnrichment {
   yellowCards?: number;
   redCards?: number;
   isSuspended?: boolean;
+  /** Notes des 5 derniers matchs (récent en premier) */
+  last5Notes?: number[];
+  /** Minutes jouées par match (5 derniers) */
+  last5Minutes?: number[];
+  /** Numéro de journée pour chaque des 5 derniers matchs (pour croiser avec adversaire) */
+  last5OpponentRounds?: number[];
 }
 
 /**
@@ -101,8 +107,9 @@ export async function getMpgStatsPlayers(
 
     let averageLast5: number | undefined;
     let momentum: number | undefined;
+    const last5Matches = matches.slice(0, 5);
     if (matches.length >= 5) {
-      const last5 = matches.slice(0, 5).map((m) => m.n ?? 0).filter((n) => n > 0);
+      const last5 = last5Matches.map((m) => m.n ?? 0).filter((n) => n > 0);
       averageLast5 = last5.length > 0 ? last5.reduce((a, b) => a + b, 0) / last5.length : undefined;
     }
     if (matches.length >= 6) {
@@ -113,12 +120,19 @@ export async function getMpgStatsPlayers(
       momentum = avgLast3 - avgPrev3;
     }
 
+    const last5Notes = last5Matches.map((m) => m.n ?? 0);
+    const last5Minutes = last5Matches.map((m) => m.m ?? 0);
+    const last5OpponentRounds = last5Matches.map((m) => m.D ?? 0);
+
     const name = [p.n, p.f].filter(Boolean).join(" ").trim() || p.n;
     if (name) {
       const entry: MpgStatsEnrichment = { average, matchs, goals };
       if (position) entry.position = position;
       if (averageLast5 != null) entry.averageLast5 = averageLast5;
       if (momentum != null) entry.momentum = momentum;
+      if (last5Notes.some((x) => x > 0)) entry.last5Notes = last5Notes;
+      if (last5Minutes.some((x) => x > 0)) entry.last5Minutes = last5Minutes;
+      if (last5OpponentRounds.some((x) => x > 0)) entry.last5OpponentRounds = last5OpponentRounds;
       map.set(normalizeName(name), entry);
       if (p.f) {
         map.set(normalizeName(`${p.f} ${p.n}`), entry);

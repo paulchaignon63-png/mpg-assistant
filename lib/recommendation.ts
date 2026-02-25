@@ -9,6 +9,8 @@ import {
   isPlayerInjuryMatchWithContext,
   type InjuryItemWithContext,
 } from "./injuries-service";
+import { getOpponentRankForClubAndRound } from "./match-opponent-rank-service";
+import { getTeamFormMultiplier } from "./team-form-service";
 
 export type Position = "G" | "D" | "M" | "A";
 
@@ -168,6 +170,27 @@ export interface PoolPlayer {
   yellowCards?: number;
   redCards?: number;
   isSuspended?: boolean;
+  /** Notes des 5 derniers matchs (MPGStats) */
+  last5Notes?: number[];
+  /** Minutes jouées par match (5 derniers) */
+  last5Minutes?: number[];
+  /** Numéro de journée par match (5 derniers) */
+  last5OpponentRounds?: number[];
+  /** Matchs joués sur les 15 derniers jours (proxy = matches avec minutes > 0) */
+  matchsLast15Days?: number;
+  xG?: number;
+  tackles?: number;
+  interceptions?: number;
+  cleanSheets?: number;
+  accuratePassPct?: number;
+  isHome?: boolean;
+  teamFormWinsLast5?: number;
+  opponentGoalsFor?: number;
+  opponentGoalsAgainst?: number;
+  injuryReturnDate?: string;
+  suspensionReturnDate?: string;
+  transferredRecently?: boolean;
+  marketValue?: string;
 }
 
 function extractPlayersFromSquad(
@@ -315,21 +338,64 @@ function extractPlayersFromSquad(
 
 export type InjuryStatus = "out" | "doubtful" | "ok";
 
+/** Coefficient adversaire pour pondérer les notes (rang 1-3: ×1.2, 4-10: ×1.0, 11-15: ×0.95, 16+: ×0.8) */
+function getOpponentCoeff(rank: number, totalTeams: number): number {
+  if (rank <= 3) return 1.2;
+  if (rank <= 10) return 1.0;
+  if (rank <= 15 || totalTeams <= 15) return 0.95;
+  return 0.8;
+}
+
+/** disponibiliteFine: 1.0 ok, 0.7 doubtful, 0.5 return imminent <3j, 0.3 sélection, 0 out */
+function getDisponibiliteFine(
+  isDoubtful: boolean,
+  isAbsenceExplained: boolean,
+  returnDate: string | undefined,
+  nextMatchDate: Date | undefined
+): number {
+  if (returnDate && nextMatchDate) {
+    const ret = new Date(returnDate);
+    const matchTime = nextMatchDate.getTime();
+    const retTime = ret.getTime();
+    const diffDays = (matchTime - retTime) / (24 * 60 * 60 * 1000);
+    if (diffDays < 0) return 0; // return après le match
+    if (diffDays <= 2) return 0.5; // return 1-2j avant
+  }
+  if (isDoubtful) return 0.7;
+  if (isAbsenceExplained) return 0.3; // sélection nationale
+  return 1.0;
+}
+
+/** fatigueMult: 0→1.0, 1→0.98, 2→0.95, 3→0.90, 4→0.85, 5+→0.75 */
+function getFatigueMult(matchsLast15Days: number): number {
+  const t: Record<number, number> = { 0: 1.0, 1: 0.98, 2: 0.95, 3: 0.9, 4: 0.85 };
+  return t[matchsLast15Days] ?? 0.75;
+}
+
+/** returnDateMult: return après match → 0; return 1-2j avant → 0.7; sinon 1.0 */
+function getReturnDateMult(
+  injuryReturnDate: string | undefined,
+  suspensionReturnDate: string | undefined,
+  nextMatchDate: Date | undefined
+): number {
+  const ret = injuryReturnDate || suspensionReturnDate;
+  if (!ret || !nextMatchDate) return 1.0;
+  const retD = new Date(ret);
+  const matchD = nextMatchDate;
+  const diffDays = (matchD.getTime() - retD.getTime()) / (24 * 60 * 60 * 1000);
+  if (diffDays < 0) return 0;
+  if (diffDays <= 2) return 0.7;
+  return 1.0;
+}
+
 /**
- * Calcule le score de recommandation selon la nouvelle formule multi-critères
- * Poids: Forme récente 60%, Régularité 15%, Performance offensive 15%, Bonus cote 5%, Momentum 5%
+ * Calcule le score selon la formule raffinée :
+ * base = formeRecentePonderee×0.35 + regularite×0.15 + perfOffensiveParPoste×0.20 + bonusCote×0.05
+ *       + momentum×0.05 + bonusTitularisation×0.05 + disponibiliteFine×0.15
+ * score = base × adversaryMult × homeAwayMult × fatigueMult × teamFormMult × returnDateMult - pénalités
  */
 export function computePlayerScore(
-  player: EnrichedPlayer & {
-    averageLast5?: number;
-    momentum?: number;
-    assists?: number;
-    clubName?: string;
-    pctTitularisations?: number;
-    yellowCards?: number;
-    redCards?: number;
-    isSuspended?: boolean;
-  },
+  player: EnrichedPlayer & PoolPlayer,
   options: {
     championshipDays?: number;
     injuredNames?: string[];
@@ -339,6 +405,9 @@ export function computePlayerScore(
     opponentRank?: number;
     totalTeams?: number;
     absenceExplainedPlayerNames?: Set<string>;
+    nextMatchDate?: Date;
+    roundOpponentRankMap?: Map<number, Map<string, number>>;
+    newsFormSignals?: { negative?: boolean };
   } = {}
 ): number {
   const {
@@ -350,10 +419,13 @@ export function computePlayerScore(
     opponentRank,
     totalTeams = 18,
     absenceExplainedPlayerNames,
+    nextMatchDate,
+    roundOpponentRankMap,
+    newsFormSignals,
   } = options;
 
   const pName = player.name ?? "";
-  const pClub = (player as { clubName?: string }).clubName;
+  const pClub = player.clubName;
 
   const isInjured =
     player.isInjured ||
@@ -373,16 +445,7 @@ export function computePlayerScore(
     (injuredDoubtfulItems.length > 0 && isPlayerInjuryMatchWithContext(pName, pClub, injuredDoubtfulItems)) ||
     (injuredDoubtfulNames.length > 0 && isPlayerInInjuryList(pName, injuredDoubtfulNames));
 
-  const useStarMode =
-    hasInsufficientData(player as PoolPlayer) && isAbsenceExplained;
-
-  const doubtfulMult = useStarMode
-    ? isDoubtful
-      ? INSUFFICIENT_DATA_THRESHOLDS.doubtfulMultStar
-      : 1
-    : isDoubtful
-      ? 0.5
-      : 1;
+  const useStarMode = hasInsufficientData(player as PoolPlayer) && isAbsenceExplained;
 
   const pos = player.position ?? "M";
   const days = Math.max(1, championshipDays);
@@ -396,33 +459,80 @@ export function computePlayerScore(
     const pctTit = player.pctTitularisations ?? 0;
     const pctTitScore = pctTit * 10;
     base = 0.5 * quotationScore + 0.3 * averageScore + 0.2 * pctTitScore;
-    if (pos === "A" && quotation > INSUFFICIENT_DATA_THRESHOLDS.attackerBonusQuotation) {
-      base += 1;
-    }
+    if (pos === "A" && quotation > INSUFFICIENT_DATA_THRESHOLDS.attackerBonusQuotation) base += 1;
+    base *= 0.8; // prudence retour blessure
   } else {
-    const formeRecente = player.averageLast5 ?? player.average ?? 5;
+    const last5Notes = player.last5Notes;
+    const last5Rounds = player.last5OpponentRounds ?? [];
+    const roundMap = roundOpponentRankMap;
+    const clubName = player.clubName;
+    const tt = totalTeams || 18;
+
+    let formeRecentePonderee: number;
+    if (roundMap?.size && last5Notes?.length && clubName) {
+      let sum = 0;
+      let count = 0;
+      for (let i = 0; i < last5Notes.length; i++) {
+        const note = last5Notes[i] ?? 5;
+        const round = last5Rounds[i];
+        const rank = round != null ? getOpponentRankForClubAndRound(roundMap, round, clubName) : undefined;
+        const coeff = rank != null ? getOpponentCoeff(rank, tt) : 1.0;
+        sum += note * coeff;
+        count += 1;
+      }
+      formeRecentePonderee = count > 0 ? Math.min(10, sum / count) : (player.averageLast5 ?? player.average ?? 5);
+    } else {
+      formeRecentePonderee = player.averageLast5 ?? player.average ?? 5;
+    }
+
     const regularite = Math.min(10, ((player.matchs ?? 0) / days) * 10);
+
     const goals = player.goals ?? 0;
     const assists = player.assists ?? 0;
-    const offCoeff = OFFENSIVE_COEFF[pos];
-    const perfOffensive = Math.min(10, (goals + assists * 0.5) * offCoeff * 0.5);
+    const xG = player.xG;
+    const tackles = player.tackles ?? 0;
+    const interceptions = player.interceptions ?? 0;
+    const cleanSheets = player.cleanSheets ?? 0;
+    const passPct = player.accuratePassPct ?? 0;
+
+    let perfOffensiveParPoste: number;
+    if (pos === "A") {
+      const raw = (goals * 1.5 + (xG ?? goals) * 0.5 + assists * 0.8) / 5;
+      perfOffensiveParPoste = Math.min(10, raw * 1.5);
+    } else if (pos === "M") {
+      const raw = assists * 1.2 + passPct * 0.3;
+      perfOffensiveParPoste = Math.min(10, raw / 3);
+    } else if (pos === "D") {
+      const raw = tackles * 0.4 + interceptions * 0.4;
+      perfOffensiveParPoste = raw > 0 ? Math.min(10, raw / 2) : Math.min(10, (goals + assists * 0.5) * 0.5);
+    } else {
+      perfOffensiveParPoste = cleanSheets > 0 ? Math.min(10, cleanSheets * 1.5 / 3) : Math.min(10, (goals + assists) * 0.3);
+    }
+
     const bonusCote = Math.min(10, (player.quotation ?? 0) / 10);
     const momentumRaw = player.momentum ?? 0;
     const momentum = Math.max(0, Math.min(10, momentumRaw + 5));
-    base =
-      formeRecente * 0.6 +
-      regularite * 0.15 +
-      perfOffensive * 0.15 +
-      bonusCote * 0.05 +
-      momentum * 0.05;
     const pctTit = player.pctTitularisations ?? 0;
-    if (pctTit > 0.7) {
-      base += Math.min(0.15, 0.05 * (pctTit - 0.7));
-    }
+    const bonusTitularisation = pctTit > 0.7 ? Math.min(10, (pctTit - 0.7) * 20) : 0;
+    const disponibiliteFine = getDisponibiliteFine(
+      isDoubtful,
+      isAbsenceExplained,
+      player.injuryReturnDate ?? player.suspensionReturnDate,
+      nextMatchDate
+    );
+
+    base =
+      formeRecentePonderee * 0.35 +
+      regularite * 0.15 +
+      perfOffensiveParPoste * 0.2 +
+      bonusCote * 0.05 +
+      momentum * 0.05 +
+      bonusTitularisation * 0.05 +
+      disponibiliteFine * 0.15 * 10;
   }
 
   let adversaryMult = 1;
-  const advRank = (player as { nextOpponentRank?: number }).nextOpponentRank ?? opponentRank;
+  const advRank = player.nextOpponentRank ?? opponentRank;
   if (advRank != null && totalTeams > 0) {
     if (advRank <= 3) adversaryMult = 0.85;
     else if (advRank <= 10) adversaryMult = 0.95;
@@ -430,19 +540,45 @@ export function computePlayerScore(
     else if (advRank >= totalTeams - 4) adversaryMult = 1.15;
   }
 
-  if ((player.redCards ?? 0) > 0) adversaryMult *= 0.7;
-  else if ((player.yellowCards ?? 0) >= 4) adversaryMult *= 0.95;
+  let advAttackDefenseMult = 1;
+  const oppGA = player.opponentGoalsAgainst;
+  const oppGF = player.opponentGoalsFor;
+  if (oppGA != null && oppGF != null) {
+    const avgGA = 35;
+    const avgGF = 30;
+    if (pos === "A") {
+      if (oppGA >= avgGA) advAttackDefenseMult = 1.15;
+      else if (oppGA <= avgGA - 10) advAttackDefenseMult = 0.85;
+    } else if (pos === "D") {
+      if (oppGF <= avgGF) advAttackDefenseMult = 1.1;
+      else if (oppGF >= avgGF + 10) advAttackDefenseMult = 0.85;
+    }
+  }
 
-  let score = Math.max(0, base * doubtfulMult * adversaryMult);
+  const homeAwayMult = player.isHome === true ? 1.08 : player.isHome === false ? 0.92 : 1;
+  const matchsLast15 = player.matchsLast15Days ?? player.last5Minutes?.filter((m) => (m ?? 0) > 0).length ?? 0;
+  const fatigueMult = getFatigueMult(matchsLast15);
+  const teamFormWins = player.teamFormWinsLast5 ?? 2;
+  const teamFormMult = getTeamFormMultiplier(teamFormWins);
+  const returnDateMult = getReturnDateMult(
+    player.injuryReturnDate,
+    player.suspensionReturnDate,
+    nextMatchDate
+  );
 
-  // Pénalité "peu de temps de jeu" pour les titulaires : évite de recommander un joueur avec 1-2 matchs
-  // (ex: gardien remplaçant qui a joué une fois). Le mode star (blessé de retour important) n'est pas pénalisé.
+  let score = base * adversaryMult * homeAwayMult * fatigueMult * teamFormMult * returnDateMult * advAttackDefenseMult;
+
+  if ((player.redCards ?? 0) > 0) score *= 0.7;
+  else if ((player.yellowCards ?? 0) >= 4) score *= 0.95;
+  if (player.transferredRecently) score *= 0.92;
+  if (newsFormSignals?.negative) score *= 0.95;
+
   const m = player.matchs ?? 0;
   if (!useStarMode && m > 0 && m < MIN_MATCHES_FOR_STARTER) {
     score *= m / MIN_MATCHES_FOR_STARTER;
   }
 
-  return Math.round(score * 100) / 100;
+  return Math.round(Math.max(0, Math.min(10, score)) * 100) / 100;
 }
 
 export interface ScoreOptions {
@@ -454,6 +590,9 @@ export interface ScoreOptions {
   opponentRank?: number;
   totalTeams?: number;
   absenceExplainedPlayerNames?: Set<string>;
+  nextMatchDate?: Date;
+  roundOpponentRankMap?: Map<number, Map<string, number>>;
+  newsFormSignals?: { negative?: boolean };
 }
 
 /**
@@ -482,6 +621,9 @@ export function selectBest11(
       opponentRank: scoreOptions.opponentRank,
       totalTeams: scoreOptions.totalTeams,
       absenceExplainedPlayerNames: scoreOptions.absenceExplainedPlayerNames,
+      nextMatchDate: scoreOptions.nextMatchDate,
+      roundOpponentRankMap: scoreOptions.roundOpponentRankMap,
+      newsFormSignals: scoreOptions.newsFormSignals,
     });
     (p as EnrichedPlayer).recommendationScore = score;
     if (score > 0 && p.position) {
