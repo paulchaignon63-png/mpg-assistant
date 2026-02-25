@@ -47,6 +47,9 @@ export const AVAILABLE_FORMATIONS = [
 /** Seuil minimum de score pour préférer un remplaçant (sinon affiché avec warning) */
 export const MIN_SUBSTITUTE_SCORE = 4;
 
+/** Nombre minimum de matchs pour être éligible titulaire sans pénalité (évite les joueurs avec 1-2 matchs) */
+const MIN_MATCHES_FOR_STARTER = 5;
+
 /** Répartition objectif du banc par formation : 1 G + 6 champ (D+M+A) */
 const BENCH_TEMPLATES: Record<number, { G: 1; D: number; M: number; A: number }> = {
   343: { G: 1, D: 1, M: 2, A: 3 },
@@ -430,7 +433,15 @@ export function computePlayerScore(
   if ((player.redCards ?? 0) > 0) adversaryMult *= 0.7;
   else if ((player.yellowCards ?? 0) >= 4) adversaryMult *= 0.95;
 
-  const score = Math.max(0, base * doubtfulMult * adversaryMult);
+  let score = Math.max(0, base * doubtfulMult * adversaryMult);
+
+  // Pénalité "peu de temps de jeu" pour les titulaires : évite de recommander un joueur avec 1-2 matchs
+  // (ex: gardien remplaçant qui a joué une fois). Le mode star (blessé de retour important) n'est pas pénalisé.
+  const m = player.matchs ?? 0;
+  if (!useStarMode && m > 0 && m < MIN_MATCHES_FOR_STARTER) {
+    score *= m / MIN_MATCHES_FOR_STARTER;
+  }
+
   return Math.round(score * 100) / 100;
 }
 
