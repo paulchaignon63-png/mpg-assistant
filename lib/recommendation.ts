@@ -372,6 +372,42 @@ function getFatigueMult(matchsLast15Days: number): number {
   return t[matchsLast15Days] ?? 0.75;
 }
 
+/**
+ * Contexte prochain match : pertinence du joueur pour le prochain match.
+ * (10 - rang/2)×0.4 + bonus_domicile×0.2 + bonus_matchup_poste×0.4
+ * Plafonné à 0 minimum pour le terme rang.
+ */
+function getContexteProchainMatch(
+  pos: Position,
+  nextOpponentRank: number | undefined,
+  isHome: boolean | undefined,
+  opponentGoalsAgainst: number | undefined,
+  opponentGoalsFor: number | undefined
+): number {
+  let termRang = 0;
+  if (nextOpponentRank != null) {
+    termRang = Math.max(0, (10 - nextOpponentRank / 2) * 0.4);
+  }
+  const bonusDomicile = isHome === true ? 10 * 0.2 : isHome === false ? 5 * 0.2 : (10 + 5) / 2 * 0.2;
+  const GA = opponentGoalsAgainst ?? 30;
+  const GF = opponentGoalsFor ?? 35;
+  let bonusMatchup = 0;
+  if (pos === "A") {
+    if (GA >= 35) bonusMatchup = 10 * 0.4;
+    else if (GA > 25) bonusMatchup = 5 * 0.4;
+    else bonusMatchup = 0;
+  } else if (pos === "D") {
+    if (GF <= 30) bonusMatchup = 10 * 0.4;
+    else if (GF < 40) bonusMatchup = 5 * 0.4;
+    else bonusMatchup = 0;
+  } else {
+    const defBonus = GA >= 35 ? 4 : GA > 25 ? 2 : 0;
+    const attBonus = GF <= 30 ? 4 : GF < 40 ? 2 : 0;
+    bonusMatchup = (defBonus + attBonus) / 2;
+  }
+  return termRang + bonusDomicile + bonusMatchup;
+}
+
 /** returnDateMult: return après match → 0; return 1-2j avant → 0.7; sinon 1.0 */
 function getReturnDateMult(
   injuryReturnDate: string | undefined,
@@ -389,10 +425,11 @@ function getReturnDateMult(
 }
 
 /**
- * Calcule le score selon la formule raffinée :
- * base = formeRecentePonderee×0.35 + regularite×0.15 + perfOffensiveParPoste×0.20 + bonusCote×0.05
- *       + momentum×0.05 + bonusTitularisation×0.05 + disponibiliteFine×0.15
- * score = base × adversaryMult × homeAwayMult × fatigueMult × teamFormMult × returnDateMult - pénalités
+ * Calcule le score selon la formule raffinée (orientée prochain match) :
+ * base = formeRecentePonderee×0.25 + regularite×0.10 + perfOffensiveParPoste×0.25 + bonusCote×0.05
+ *       + momentum×0.05 + bonusTitularisation×0.05 + contexteProchainMatch×0.25 + disponibiliteFine×0.15
+ * Forme récente pondérée par minutes jouées (note × coeff_adv × min/90).
+ * score = base × adversaryMult × homeAwayMult × fatigueMult × teamFormMult × returnDateMult × advAttackDefenseMult - pénalités
  */
 export function computePlayerScore(
   player: EnrichedPlayer & PoolPlayer,
@@ -469,18 +506,22 @@ export function computePlayerScore(
     const tt = totalTeams || 18;
 
     let formeRecentePonderee: number;
+    const last5Minutes = player.last5Minutes ?? [];
     if (roundMap?.size && last5Notes?.length && clubName) {
-      let sum = 0;
-      let count = 0;
+      let sumWeighted = 0;
+      let sumWeights = 0;
       for (let i = 0; i < last5Notes.length; i++) {
         const note = last5Notes[i] ?? 5;
         const round = last5Rounds[i];
         const rank = round != null ? getOpponentRankForClubAndRound(roundMap, round, clubName) : undefined;
         const coeff = rank != null ? getOpponentCoeff(rank, tt) : 1.0;
-        sum += note * coeff;
-        count += 1;
+        const minutes = last5Minutes[i] ?? 90;
+        const weight = Math.min(90, Math.max(0, minutes)) / 90;
+        sumWeighted += note * coeff * weight;
+        sumWeights += weight;
       }
-      formeRecentePonderee = count > 0 ? Math.min(10, sum / count) : (player.averageLast5 ?? player.average ?? 5);
+      formeRecentePonderee =
+        sumWeights > 0 ? Math.min(10, sumWeighted / sumWeights) : (player.averageLast5 ?? player.average ?? 5);
     } else {
       formeRecentePonderee = player.averageLast5 ?? player.average ?? 5;
     }
@@ -521,13 +562,22 @@ export function computePlayerScore(
       nextMatchDate
     );
 
+    const contexteProchainMatch = getContexteProchainMatch(
+      pos,
+      player.nextOpponentRank ?? opponentRank,
+      player.isHome,
+      player.opponentGoalsAgainst,
+      player.opponentGoalsFor
+    );
+
     base =
-      formeRecentePonderee * 0.35 +
-      regularite * 0.15 +
-      perfOffensiveParPoste * 0.2 +
+      formeRecentePonderee * 0.25 +
+      regularite * 0.1 +
+      perfOffensiveParPoste * 0.25 +
       bonusCote * 0.05 +
       momentum * 0.05 +
       bonusTitularisation * 0.05 +
+      contexteProchainMatch * 0.25 +
       disponibiliteFine * 0.15 * 10;
   }
 
