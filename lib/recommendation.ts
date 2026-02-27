@@ -9,6 +9,7 @@ import {
   isPlayerInjuryMatchWithContext,
   type InjuryItemWithContext,
 } from "./injuries-service";
+import { getRotationPairKey, normalizeForRotation } from "./rotation-service";
 import { getOpponentRankForClubAndRound } from "./match-opponent-rank-service";
 import { getTeamFormMultiplier } from "./team-form-service";
 
@@ -170,6 +171,7 @@ export interface PoolPlayer {
   yellowCards?: number;
   redCards?: number;
   isSuspended?: boolean;
+  isInjured?: boolean;
   /** Notes des 5 derniers matchs (MPGStats) */
   last5Notes?: number[];
   /** Minutes jouées par match (5 derniers) */
@@ -178,6 +180,8 @@ export interface PoolPlayer {
   last5OpponentRounds?: number[];
   /** Matchs joués sur les 15 derniers jours (proxy = matches avec minutes > 0) */
   matchsLast15Days?: number;
+  /** Bug 2.1 : matchs joués en 7 jours dans autres compétitions (LDC, Coupe) */
+  matchsLast7DaysOtherComps?: number;
   xG?: number;
   tackles?: number;
   interceptions?: number;
@@ -366,10 +370,11 @@ function getDisponibiliteFine(
   return 1.0;
 }
 
-/** fatigueMult: 0→1.0, 1→0.98, 2→0.95, 3→0.90, 4→0.85, 5+→0.75 */
-function getFatigueMult(matchsLast15Days: number): number {
+/** fatigueMult: 0→1.0, 1→0.98, 2→0.95, 3→0.90, 4→0.85, 5+→0.75. Bug 2.1 : inclut matchs autres compétitions. */
+function getFatigueMult(matchsLast15Days: number, matchsLast7DaysOtherComps: number = 0): number {
+  const total = matchsLast15Days + matchsLast7DaysOtherComps;
   const t: Record<number, number> = { 0: 1.0, 1: 0.98, 2: 0.95, 3: 0.9, 4: 0.85 };
-  return t[matchsLast15Days] ?? 0.75;
+  return t[total] ?? 0.75;
 }
 
 /**
@@ -464,8 +469,9 @@ export function computePlayerScore(
   const pName = player.name ?? "";
   const pClub = player.clubName;
 
+  // NIVEAU 1 : blessé ou suspendu → score = 0 (avant tout autre calcul)
   const isInjured =
-    player.isInjured ||
+    player.isInjured === true ||
     (injuredItems.length > 0 && isPlayerInjuryMatchWithContext(pName, pClub, injuredItems)) ||
     (injuredNames.length > 0 && isPlayerInInjuryList(pName, injuredNames));
   if (isInjured) return 0;
@@ -607,7 +613,8 @@ export function computePlayerScore(
 
   const homeAwayMult = player.isHome === true ? 1.08 : player.isHome === false ? 0.92 : 1;
   const matchsLast15 = player.matchsLast15Days ?? player.last5Minutes?.filter((m) => (m ?? 0) > 0).length ?? 0;
-  const fatigueMult = getFatigueMult(matchsLast15);
+  const matchsLast7Other = player.matchsLast7DaysOtherComps ?? 0;
+  const fatigueMult = getFatigueMult(matchsLast15, matchsLast7Other);
   const teamFormWins = player.teamFormWinsLast5 ?? 2;
   const teamFormMult = getTeamFormMultiplier(teamFormWins);
   const returnDateMult = getReturnDateMult(
@@ -643,6 +650,8 @@ export interface ScoreOptions {
   nextMatchDate?: Date;
   roundOpponentRankMap?: Map<number, Map<string, number>>;
   newsFormSignals?: { negative?: boolean };
+  /** Bug 2.2 : paires (clubNorm_pos_key1_key2) à ne pas recommander ensemble */
+  rotationLowPairs?: Set<string>;
 }
 
 /**
@@ -676,16 +685,44 @@ export function selectBest11(
       newsFormSignals: scoreOptions.newsFormSignals,
     });
     (p as EnrichedPlayer).recommendationScore = score;
+    // Assertion Bug 1.1/1.2 : un joueur blessé ou suspendu doit avoir score 0
+    const isInjuredPlayer =
+      p.isInjured === true ||
+      (injItems.length > 0 && isPlayerInjuryMatchWithContext(p.name ?? "", p.clubName, injItems)) ||
+      (inj.length > 0 && isPlayerInInjuryList(p.name ?? "", inj));
+    const isSuspendedPlayer = (p as { isSuspended?: boolean }).isSuspended === true;
+    if (score > 0 && (isInjuredPlayer || isSuspendedPlayer) && process.env.NODE_ENV === "development") {
+      console.error(
+        "[recommendation] ERREUR score>0 pour joueur indisponible:",
+        p.name,
+        { score, isInjured: isInjuredPlayer, isSuspended: isSuspendedPlayer }
+      );
+    }
     if (score > 0 && p.position) {
       byPos[p.position].push(p as EnrichedPlayer);
     }
   }
 
   const selected: EnrichedPlayer[] = [];
+  const rotationLowPairs = scoreOptions.rotationLowPairs ?? new Set<string>();
   for (const pos of ["G", "D", "M", "A"] as const) {
     const needed = form[pos];
     const sorted = byPos[pos].sort((a, b) => b.recommendationScore - a.recommendationScore);
-    selected.push(...sorted.slice(0, needed));
+    const picked: EnrichedPlayer[] = [];
+    for (const p of sorted) {
+      if (picked.length >= needed) break;
+      const clubNorm = p.clubName ? normalizeForRotation(p.clubName) : "";
+      const keyNorm = p.name ? normalizeForRotation(p.name) : "";
+      const blocked = rotationLowPairs.size > 0 && clubNorm && keyNorm && picked.some((prev) => {
+        const prevClub = prev.clubName ? normalizeForRotation(prev.clubName) : "";
+        const prevKey = prev.name ? normalizeForRotation(prev.name) : "";
+        if (prevClub !== clubNorm) return false;
+        const pairKey = getRotationPairKey(clubNorm, pos, prevKey, keyNorm);
+        return rotationLowPairs.has(pairKey);
+      });
+      if (!blocked) picked.push(p as EnrichedPlayer);
+    }
+    selected.push(...picked);
   }
   return selected;
 }

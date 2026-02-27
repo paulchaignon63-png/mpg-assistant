@@ -25,6 +25,21 @@ const CHAMP_TO_SOFASCORE: Record<string, number> = {
   LIGUE_SUPER: 238,
 };
 
+/** Championnat principal → tournois "autres compétitions" (ex: LDC, Coupe) pour fatigue multi-comp */
+const MAIN_CHAMP_TO_OTHER_TOURNAMENTS: Record<string, number[]> = {
+  "1": [7],
+  LIGUE_1: [7],
+  "2": [7],
+  PREMIER_LEAGUE: [7],
+  "3": [7],
+  LIGA: [7],
+  "4": [],
+  "5": [7],
+  SERIE_A: [7],
+  "6": [],
+  "7": [],
+};
+
 export interface SofascoreStandingRow {
   team: { id: number; name: string; slug?: string };
   position?: number;
@@ -648,4 +663,108 @@ export async function getSofascorePlayerDetailedStats(
     result.set(key, stats);
   }
   return result;
+}
+
+const SEVEN_DAYS_SEC = 7 * 24 * 3600;
+
+/**
+ * Bug 2.1 : Nombre de matchs joués en 7 jours dans les autres compétitions (LDC, Coupe).
+ * Utilisé pour appliquer un malus fatigue (matchs en semaine = risque rotation).
+ */
+export async function getMatchCountLast7DaysOtherCompetitions(
+  mainChampionshipId: number | string
+): Promise<Map<string, number>> {
+  const key = String(mainChampionshipId);
+  const otherTids = MAIN_CHAMP_TO_OTHER_TOURNAMENTS[key];
+  if (!otherTids?.length) return new Map();
+
+  const now = Math.floor(Date.now() / 1000);
+  const cutoff = now - SEVEN_DAYS_SEC;
+  const countByPlayer = new Map<string, number>();
+
+  for (const tid of otherTids) {
+    const seasonId = await getCurrentSeasonId(tid);
+    if (seasonId == null) continue;
+    const maxRounds = tid === 7 ? 12 : 8;
+    for (let round = 1; round <= maxRounds; round++) {
+      const eventsData = await fetchJson<{ events?: Array<{ id: number; startTimestamp?: number; status?: { code?: number } }> }>(
+        `${SOFASCORE_BASE}/unique-tournament/${tid}/season/${seasonId}/events/round/${round}`
+      );
+      const events = (eventsData?.events ?? []).filter(
+        (e) => e.status?.code === 100 && (e.startTimestamp ?? 0) >= cutoff
+      );
+      if (events.length === 0 && round > 2) continue;
+      for (const ev of events) {
+        const lineupsData = await fetchJson<SofascoreLineupsResponse>(
+          `${SOFASCORE_BASE}/event/${ev.id}/lineups`
+        );
+        const allPlayers: SofascoreLineupPlayer[] = [
+          ...(lineupsData?.home?.players ?? []),
+          ...(lineupsData?.away?.players ?? []),
+        ];
+        for (const lp of allPlayers) {
+          const name = lp.player?.name?.trim();
+          if (!name) continue;
+          const n = normalizePlayerName(name);
+          countByPlayer.set(n, (countByPlayer.get(n) ?? 0) + 1);
+        }
+        await new Promise((r) => setTimeout(r, 80));
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+  return countByPlayer;
+}
+
+/** Un match avec les titulaires par équipe (pour calcul co-titularisation) */
+export interface LineupHistoryRecord {
+  homeTeam: string;
+  awayTeam: string;
+  homeStarters: string[];
+  awayStarters: string[];
+}
+
+/**
+ * Bug 2.2 : Historique des compos (titulaires par match) pour calcul des rotations.
+ */
+export async function getSofascoreLineupHistory(
+  championshipId: number | string,
+  maxRounds = 25
+): Promise<LineupHistoryRecord[]> {
+  const tid = getUniqueTournamentId(championshipId);
+  if (tid == null) return [];
+
+  const seasonId = await getCurrentSeasonId(tid);
+  if (seasonId == null) return [];
+
+  const records: LineupHistoryRecord[] = [];
+  const eventIdsSeen = new Set<number>();
+
+  for (let round = 1; round <= maxRounds; round++) {
+    const eventsData = await fetchJson<{ events?: SofascoreEvent[] }>(
+      `${SOFASCORE_BASE}/unique-tournament/${tid}/season/${seasonId}/events/round/${round}`
+    );
+    const events = (eventsData?.events ?? []).filter((e) => e.status?.code === 100);
+    if (events.length === 0 && round > 5) break;
+
+    for (const ev of events) {
+      if (eventIdsSeen.has(ev.id)) continue;
+      eventIdsSeen.add(ev.id);
+      const lineupsData = await fetchJson<SofascoreLineupsResponse>(
+        `${SOFASCORE_BASE}/event/${ev.id}/lineups`
+      );
+      const homeTeam = ev.homeTeam?.name ?? "";
+      const awayTeam = ev.awayTeam?.name ?? "";
+      const homeStarters = (lineupsData?.home?.players ?? [])
+        .filter((p) => p.substitute === false)
+        .map((p) => normalizePlayerName(p.player?.name?.trim() ?? ""));
+      const awayStarters = (lineupsData?.away?.players ?? [])
+        .filter((p) => p.substitute === false)
+        .map((p) => normalizePlayerName(p.player?.name?.trim() ?? ""));
+      records.push({ homeTeam, awayTeam, homeStarters, awayStarters });
+      await new Promise((r) => setTimeout(r, 80));
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return records;
 }
