@@ -68,13 +68,18 @@ export function isPlayerInInjuryList(
   normalize: (s: string) => string = normalizeInjuryName
 ): boolean {
   if (!playerName?.trim()) return false;
-  const p = normalize(playerName);
-  const lastName = p.split(" ").pop() ?? p;
+  const pNorm = normalize(playerName);
+  const pTokens = pNorm.split(" ").filter(Boolean);
   for (const inj of injuryNames) {
-    const i = normalize(inj);
-    if (p === i || i === p) return true;
-    if (p.includes(i) || i.includes(p)) return true;
-    if (lastName && (i.includes(lastName) || lastName.includes(i))) return true;
+    const iNorm = normalize(inj);
+    const iTokens = iNorm.split(" ").filter(Boolean);
+    // Match strict ou quasi-strict sur le nom complet
+    if (pNorm === iNorm || pNorm.includes(iNorm) || iNorm.includes(pNorm)) return true;
+    // Match tokens indépendamment de l'ordre :
+    // - si les deux noms partagent au moins 2 tokens (ex: "ousmane dembele" vs "dembele ousmane"),
+    //   on considère que c'est le même joueur.
+    const common = pTokens.filter((t) => iTokens.includes(t));
+    if (common.length >= 2) return true;
   }
   return false;
 }
@@ -96,16 +101,19 @@ export function isPlayerInjuryMatchWithContext(
   if (!playerName?.trim() || injuryItems.length === 0) return false;
   const pNorm = normalize(playerName);
   const pClubNorm = playerClubName ? normalize(playerClubName) : undefined;
-  const lastName = pNorm.split(" ").pop() ?? pNorm;
+  const pTokens = pNorm.split(" ").filter(Boolean);
 
   for (const inj of injuryItems) {
     const iNorm = normalize(inj.playerName);
+    const iTokens = iNorm.split(" ").filter(Boolean);
     const nameMatch =
       pNorm === iNorm ||
       iNorm === pNorm ||
       pNorm.includes(iNorm) ||
       iNorm.includes(pNorm) ||
-      (lastName && (iNorm.includes(lastName) || lastName.includes(iNorm)));
+      // Match tokens indépendamment de l'ordre : au moins 2 tokens en commun
+      // (évite "Clauss Jonathan" vs "Jonathan Gradit" qui ne partagent qu'un prénom).
+      pTokens.filter((t) => iTokens.includes(t)).length >= 2;
 
     if (!nameMatch) continue;
 

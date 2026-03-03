@@ -548,6 +548,80 @@ export async function POST(request: NextRequest) {
     }
 
     // #region agent log
+    (() => {
+      try {
+        const norm = (s: string | undefined) =>
+          (s ?? "")
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/\p{Diacritic}/gu, "")
+            .replace(/\s+/g, " ")
+            .trim();
+        const targets = ["kouassi", "sulc", "clauss"];
+        const starters = recommended;
+        const subsAll = (["G", "D", "M", "A"] as const).flatMap((pos) => substitutes[pos] ?? []);
+        const allLofteurs = lofteurs;
+        const entries: Array<{
+          target: string;
+          inStarters: boolean;
+          inSubs: boolean;
+          inLofteurs: boolean;
+          info?: {
+            name?: string;
+            position?: string;
+            recommendationScore: number;
+            isInjured?: boolean;
+            isSuspended?: boolean;
+            scoreZeroReason?: string;
+          };
+        }> = [];
+        for (const t of targets) {
+          const matchIn = (arr: Array<{ name?: string }>) =>
+            arr.find((p) => {
+              const n = norm(p.name);
+              return n.includes(t) || t.includes(n);
+            });
+          const sMatch = matchIn(starters);
+          const subMatch = matchIn(subsAll);
+          const lMatch = matchIn(allLofteurs);
+          const p = (sMatch ?? subMatch ?? lMatch) as
+            | (PoolPlayer & { position?: string; recommendationScore?: number; isInjured?: boolean; isSuspended?: boolean; scoreZeroReason?: string })
+            | undefined;
+          entries.push({
+            target: t,
+            inStarters: !!sMatch,
+            inSubs: !!subMatch,
+            inLofteurs: !!lMatch,
+            info: p && {
+              name: p.name,
+              position: (p as { position?: string })?.position,
+              recommendationScore: (p as { recommendationScore?: number }).recommendationScore ?? 0,
+              isInjured: (p as { isInjured?: boolean }).isInjured,
+              isSuspended: (p as { isSuspended?: boolean }).isSuspended,
+              scoreZeroReason: (p as { scoreZeroReason?: string }).scoreZeroReason,
+            },
+          });
+        }
+        fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            location: "recommendations/route.ts:debugTargets",
+            message: "Debug injured targets (Kouassi, Sulc, Clauss)",
+            data: {
+              entries,
+            },
+            timestamp: Date.now(),
+            hypothesisId: "H1,H2,H3",
+          }),
+        }).catch(() => {});
+      } catch {
+        // ignore debug errors
+      }
+    })();
+    // #endregion
+
+    // #region agent log
     const byPosCount = { G: 0, D: 0, M: 0, A: 0 };
     for (const p of recommended) {
       if (p.position && p.position in byPosCount) byPosCount[p.position as keyof typeof byPosCount]++;
