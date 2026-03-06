@@ -50,6 +50,8 @@ function normalizePoolPlayer(p: Record<string, unknown>): {
   clubName?: string;
   /** Suspendu (rouge sur MPG) si l'API l'expose */
   isSuspended?: boolean;
+  /** Disponible / dispo (vert sur MPG) si l'API l'expose */
+  available?: boolean;
 } {
   const id = String(p.id ?? p.i ?? p._id ?? "").trim() || undefined;
   const firstName = String(p.firstName ?? p.f ?? "").trim() || undefined;
@@ -73,6 +75,12 @@ function normalizePoolPlayer(p: Record<string, unknown>): {
     (typeof p.status === "string" && (p.status as string).toLowerCase() === "suspended") ||
     (typeof p.unavailable === "boolean" && p.unavailable) ||
     undefined;
+  // Dispo / disponible sur MPG (vert)
+  const available =
+    p.available === true ||
+    p.dispo === true ||
+    (typeof p.status === "string" && ["available", "dispo", "fit"].includes((p.status as string).toLowerCase())) ||
+    undefined;
   return {
     id,
     name,
@@ -86,6 +94,7 @@ function normalizePoolPlayer(p: Record<string, unknown>): {
     clubId,
     clubName,
     ...(isSuspended !== undefined && { isSuspended }),
+    ...(available !== undefined && { available }),
   };
 }
 
@@ -180,7 +189,7 @@ export class MpgClient {
    * championshipId: 1=L1, 2=PL, 3=Liga, 4=L2, 5=Serie A (ou "LIGUE_1", "1", etc.)
    * L'API peut renvoyer des champs abrégés (f, n, p, q, a, etc.) - on les normalise
    */
-  async getPoolPlayers(championshipId: number | string): Promise<{ poolPlayers?: Array<{ id?: string; name?: string; firstName?: string; lastName?: string; position?: string; quotation?: number; average?: number; matchs?: number; goals?: number; clubId?: string; clubName?: string; isSuspended?: boolean }> }> {
+  async getPoolPlayers(championshipId: number | string): Promise<{ poolPlayers?: Array<{ id?: string; name?: string; firstName?: string; lastName?: string; position?: string; quotation?: number; average?: number; matchs?: number; goals?: number; clubId?: string; clubName?: string; isSuspended?: boolean; available?: boolean }> }> {
     const id = normalizeChampionshipId(championshipId);
     const res = await fetch(`${MPG_API_URL}/championship-players-pool/${id}`, {
       headers: this.getHeaders(),

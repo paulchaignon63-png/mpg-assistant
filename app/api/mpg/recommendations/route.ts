@@ -413,6 +413,14 @@ export async function POST(request: NextRequest) {
         }
       }
     }
+    // Dispo sur MPG (vert) : même logique, on retire des blessés
+    for (const p of pool?.poolPlayers ?? (pool as { players?: PoolPlayer[] })?.players ?? []) {
+      const isDispo = (p as { available?: boolean }).available === true;
+      if (isDispo) {
+        const name = p.name ?? [p.lastName, p.firstName].filter(Boolean).join(" ").trim();
+        if (name) inSquadOrReturnSet.add(normForMatch(name));
+      }
+    }
     const resolved = resolveInjuriesWithPriority(
       injuries.injured ?? [],
       injuries.doubtful ?? [],

@@ -15,6 +15,21 @@ function normalize(s: string): string {
     .trim();
 }
 
+/** Retourne true si le nom (ex. "Dembélé Ousmane") matche au moins une entrée du set (ex. "ousmane dembele") par tokens. */
+function isApteMatch(playerName: string, apteSet: Set<string>): boolean {
+  if (!playerName?.trim() || apteSet.size === 0) return false;
+  const n = normalize(playerName);
+  if (apteSet.has(n)) return true;
+  const tokens = n.split(" ").filter(Boolean);
+  for (const entry of apteSet) {
+    if (n.includes(entry) || entry.includes(n)) return true;
+    const entryTokens = entry.split(" ").filter(Boolean);
+    const common = tokens.filter((t) => entryTokens.includes(t));
+    if (common.length >= 2) return true;
+  }
+  return false;
+}
+
 export interface ResolvedInjuries {
   injured: string[];
   doubtful: string[];
@@ -48,17 +63,17 @@ export function resolveInjuriesWithPriority(
 
   // Toujours retirer les joueurs annoncés dans le groupe / de retour (news)
   const apteFromNews = inSquadOrReturnSet ?? new Set<string>();
-  let injuredFiltered = injured.filter((n) => !apteFromNews.has(normalize(n)));
-  let doubtfulFiltered = doubtful.filter((n) => !apteFromNews.has(normalize(n)));
+  let injuredFiltered = injured.filter((n) => !isApteMatch(n, apteFromNews));
+  let doubtfulFiltered = doubtful.filter((n) => !isApteMatch(n, apteFromNews));
   let injuredItemsFiltered =
-    injuredItems?.filter((it) => !apteFromNews.has(normalize(it.playerName)));
+    injuredItems?.filter((it) => !isApteMatch(it.playerName, apteFromNews));
   let doubtfulItemsFiltered =
-    doubtfulItems?.filter((it) => !apteFromNews.has(normalize(it.playerName)));
+    doubtfulItems?.filter((it) => !isApteMatch(it.playerName, apteFromNews));
 
   if (process.env.NODE_ENV === "development" && apteFromNews.size > 0) {
     const removed = [
-      ...injured.filter((n) => apteFromNews.has(normalize(n))),
-      ...doubtful.filter((n) => apteFromNews.has(normalize(n))),
+      ...injured.filter((n) => isApteMatch(n, apteFromNews)),
+      ...doubtful.filter((n) => isApteMatch(n, apteFromNews)),
     ];
     if (removed.length > 0) {
       console.log("[Status] Annonces « dans le groupe » / « de retour » : retirés des listes blessés/douteux:", removed.join(", "));
