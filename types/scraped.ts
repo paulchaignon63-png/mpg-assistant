@@ -26,8 +26,8 @@ export interface ScrapedNewsItem {
   playerNames?: string[];
   /** Clubs concernés */
   clubNames?: string[];
-  /** Type: blessure, suspension, transfert, forme, autre */
-  type: "injury" | "suspension" | "transfer" | "form" | "lineup" | "other";
+  /** Type: blessure, suspension, transfert, forme, dans le groupe / retour, autre */
+  type: "injury" | "suspension" | "transfer" | "form" | "lineup" | "in_squad" | "return" | "other";
   /** Niveau de confiance 0-1 (pour le matching) */
   confidence?: number;
 }

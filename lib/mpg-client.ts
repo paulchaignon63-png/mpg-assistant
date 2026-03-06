@@ -48,6 +48,8 @@ function normalizePoolPlayer(p: Record<string, unknown>): {
   goals?: number;
   clubId?: string;
   clubName?: string;
+  /** Suspendu (rouge sur MPG) si l'API l'expose */
+  isSuspended?: boolean;
 } {
   const id = String(p.id ?? p.i ?? p._id ?? "").trim() || undefined;
   const firstName = String(p.firstName ?? p.f ?? "").trim() || undefined;
@@ -64,6 +66,13 @@ function normalizePoolPlayer(p: Record<string, unknown>): {
   const goals = typeof p.goals === "number" ? p.goals : (typeof p.g === "number" ? p.g : (s && typeof s.g === "number" ? s.g : undefined));
   const clubId = (String(p.clubId ?? p.c ?? "").trim()) || undefined;
   const clubName = (String(p.clubName ?? "").trim()) || undefined;
+  // Rouge / suspendu sur MPG : champs possibles selon l'API
+  const isSuspended =
+    p.isSuspended === true ||
+    p.suspended === true ||
+    (typeof p.status === "string" && (p.status as string).toLowerCase() === "suspended") ||
+    (typeof p.unavailable === "boolean" && p.unavailable) ||
+    undefined;
   return {
     id,
     name,
@@ -76,6 +85,7 @@ function normalizePoolPlayer(p: Record<string, unknown>): {
     goals,
     clubId,
     clubName,
+    ...(isSuspended !== undefined && { isSuspended }),
   };
 }
 
@@ -170,7 +180,7 @@ export class MpgClient {
    * championshipId: 1=L1, 2=PL, 3=Liga, 4=L2, 5=Serie A (ou "LIGUE_1", "1", etc.)
    * L'API peut renvoyer des champs abrégés (f, n, p, q, a, etc.) - on les normalise
    */
-  async getPoolPlayers(championshipId: number | string): Promise<{ poolPlayers?: Array<{ id?: string; name?: string; firstName?: string; lastName?: string; position?: string; quotation?: number; average?: number; matchs?: number; goals?: number; clubId?: string; clubName?: string }> }> {
+  async getPoolPlayers(championshipId: number | string): Promise<{ poolPlayers?: Array<{ id?: string; name?: string; firstName?: string; lastName?: string; position?: string; quotation?: number; average?: number; matchs?: number; goals?: number; clubId?: string; clubName?: string; isSuspended?: boolean }> }> {
     const id = normalizeChampionshipId(championshipId);
     const res = await fetch(`${MPG_API_URL}/championship-players-pool/${id}`, {
       headers: this.getHeaders(),

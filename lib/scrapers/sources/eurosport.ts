@@ -15,6 +15,13 @@ function guessType(title: string): ScrapedNewsItem["type"] {
   if (t.includes("bless") || t.includes("injury") || t.includes("absence")) return "injury";
   if (t.includes("susp") || t.includes("carton") || t.includes("rouge")) return "suspension";
   if (t.includes("transfert") || t.includes("prêt") || t.includes("signe")) return "transfer";
+  if (
+    t.includes("dans le groupe") ||
+    t.includes("convoqué") ||
+    t.includes("de retour") ||
+    t.includes("présent dans la liste")
+  )
+    return "in_squad";
   return "other";
 }
 

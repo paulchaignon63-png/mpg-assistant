@@ -14,6 +14,7 @@ interface SubstitutePlayer {
 }
 
 interface EnrichedPlayer {
+  id?: string;
   name?: string;
   position?: string;
   quotation?: number;
@@ -35,11 +36,6 @@ function SubstituteItem({ sub }: { sub: SubstitutePlayer }) {
       title={label}
       className={`inline-flex items-center gap-1 text-sm text-[#9CA3AF] ${sub.lowScoreReason ? "italic" : ""}`}
     >
-      {sub.lowScoreReason && (
-        <span className="text-amber-400" aria-hidden>
-          ⚠
-        </span>
-      )}
       {sub.name ?? "?"} ({sub.recommendationScore.toFixed(1)})
     </span>
   );
@@ -115,6 +111,7 @@ export default function TeamPage({
   const [teamName, setTeamName] = useState("");
   const [leagueName, setLeagueName] = useState("");
   const [recommended, setRecommended] = useState<EnrichedPlayer[]>([]);
+  const [suggestedCaptainId, setSuggestedCaptainId] = useState<string | null>(null);
   const [substitutes, setSubstitutes] = useState<Record<string, SubstitutePlayer[]>>({ G: [], D: [], M: [], A: [] });
   const [lofteurs, setLofteurs] = useState<LofteurPlayer[]>([]);
   const [selectedFormation, setSelectedFormation] = useState(343);
@@ -162,6 +159,7 @@ export default function TeamPage({
           // #endregion
           setTeamName(data.team ?? "Mon équipe");
           setRecommended(data.recommended ?? []);
+          setSuggestedCaptainId(data.suggestedCaptainId ?? null);
           setSubstitutes(data.substitutes ?? { G: [], D: [], M: [], A: [] });
           setLofteurs(data.lofteurs ?? []);
           const usedForm = data.formation ?? 343;
@@ -222,6 +220,7 @@ export default function TeamPage({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Erreur");
       setRecommended(data.recommended ?? []);
+      setSuggestedCaptainId(data.suggestedCaptainId ?? null);
       setSubstitutes(data.substitutes ?? { G: [], D: [], M: [], A: [] });
       setLofteurs(data.lofteurs ?? []);
       const usedForm = data.formation ?? newFormation;
@@ -349,6 +348,15 @@ export default function TeamPage({
                       >
                         <span className="font-medium text-[#F9FAFB]">
                           {p.name ?? "?"}
+                          {suggestedCaptainId && (p.id === suggestedCaptainId || p.name === suggestedCaptainId) && (
+                            <span
+                              className="ml-1.5 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded px-1 text-xs font-bold text-white bg-[#B45309]"
+                              title="Capitaine proposé (bonus de points)"
+                              aria-label="Capitaine proposé"
+                            >
+                              C
+                            </span>
+                          )}
                         </span>
                         <div className="flex items-center gap-6">
                           <ScoreBar score={p.recommendationScore} />

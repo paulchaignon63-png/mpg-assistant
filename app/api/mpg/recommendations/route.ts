@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createMpgClient } from "@/lib/mpg-client";
 import { getMpgStatsPlayersWithFallback, type MpgStatsEnrichment } from "@/lib/mpgstats-client";
-import { getSofascorePlayerDetailedStats } from "@/lib/sofascore-client";
+import { getSofascorePlayerDetailedStats, getSofascoreSuspendedFromLastRound } from "@/lib/sofascore-client";
 import { scrapeTransfermarktSuspensions } from "@/lib/scrapers/sources/transfermarkt";
 import { fetchEnrichedInjuries } from "@/lib/scraped-injuries-service";
 import {
@@ -11,7 +11,7 @@ import {
 } from "@/lib/opponent-rank-service";
 import { isPlayerInInjuryList, isPlayerInjuryMatchWithContext, type InjuryItemWithContext } from "@/lib/injuries-service";
 import { fetchSofascoreStandingsAndFixtures, getNextMatchdayFirstMatch, getMatchCountLast7DaysOtherCompetitions } from "@/lib/sofascore-client";
-import { getRecommendedTeamWithSubstitutes, type PoolPlayer } from "@/lib/recommendation";
+import { getRecommendedTeamWithSubstitutes, getSuggestedCaptain, type PoolPlayer } from "@/lib/recommendation";
 import { getTeamFormForClubs } from "@/lib/team-form-service";
 import { getRoundToOpponentRankMap } from "@/lib/match-opponent-rank-service";
 import { getTransferredRecentlyPlayerNames } from "@/lib/transfer-recency-service";
@@ -291,6 +291,7 @@ export async function POST(request: NextRequest) {
       statsMap,
       sofascoreMap,
       suspensionsFull,
+      sofascoreSuspendedFromLastRound,
       injuries,
       opponentData,
       roundOpponentRankMap,
@@ -309,6 +310,9 @@ export async function POST(request: NextRequest) {
       effectiveChampId
         ? scrapeTransfermarktSuspensions({ championshipId: effectiveChampId }).catch(() => [])
         : Promise.resolve([]),
+      effectiveChampId
+        ? getSofascoreSuspendedFromLastRound(effectiveChampId).catch(() => new Set<string>())
+        : Promise.resolve(new Set<string>()),
       effectiveChampId
         ? fetchEnrichedInjuries(effectiveChampId, apiKey, {
             enableScraping: process.env.ENABLE_SCRAPED_INJURIES !== "0",
@@ -382,19 +386,41 @@ export async function POST(request: NextRequest) {
       suspendedNames.add(k);
       if (s.returnDate) suspensionReturnByPlayer.set(k, s.returnDate);
     }
+    // Filet de sécurité : suspendus depuis les news (RSS, L'Equipe, etc.)
+    for (const n of scrapedData.news ?? []) {
+      if (n.type === "suspension" && n.playerNames?.length) {
+        for (const name of n.playerNames) {
+          suspendedNames.add(normForMatch(name));
+        }
+      }
+    }
+    // Filet de sécurité : cartons rouges dernière journée (SofaScore)
+    for (const name of sofascoreSuspendedFromLastRound) {
+      suspendedNames.add(name);
+    }
 
     // Statuts blessés/douteux : utilisation directe des sources (SofaScore, MPG, RSS) via fetchEnrichedInjuries.
     // Plus de réconciliation sur "a joué les 2 dernières journées" (critère supprimé).
     // Agrégation avec hiérarchie configurable (STATUS_SOURCE_PRIORITY, TRUST_MPG_APTE_WHEN_CONFLICT).
     const statusConfig = getStatusSourcesConfig();
-    const mpgApteSet = new Set<string>(); // À remplir quand l'API MPG exposera un statut "apte" par joueur
+    const mpgApteSet = new Set<string>();
+    // Annonces "dans le groupe" / "de retour" : retirer ces joueurs des listes blessés/douteux (toujours appliqué)
+    const inSquadOrReturnSet = new Set<string>();
+    for (const n of scrapedData.news ?? []) {
+      if ((n.type === "in_squad" || n.type === "return") && n.playerNames?.length) {
+        for (const name of n.playerNames) {
+          inSquadOrReturnSet.add(normForMatch(name));
+        }
+      }
+    }
     const resolved = resolveInjuriesWithPriority(
       injuries.injured ?? [],
       injuries.doubtful ?? [],
       injuries.injuredItems,
       injuries.doubtfulItems,
       mpgApteSet,
-      statusConfig
+      statusConfig,
+      inSquadOrReturnSet
     );
     const injuriesResolved = {
       ...resolved,
@@ -643,12 +669,16 @@ export async function POST(request: NextRequest) {
     fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({location:"recommendations/route.ts:response",message:"lofteurs before send",data:{lofteursLength:lofteurs.length,lofteursSample:lofteurs.slice(0,3),recommendedCount:recommended.length},timestamp:Date.now(),hypothesisId:"H2,H3,H4"})}).catch(()=>{});
     // #endregion
 
+    const suggestedCaptain = getSuggestedCaptain(recommended);
+    const suggestedCaptainId = suggestedCaptain?.id ?? suggestedCaptain?.name ?? null;
+
     return NextResponse.json({
       team: team.name,
       formation: form,
       recommended,
       substitutes,
       lofteurs,
+      suggestedCaptainId,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Erreur";

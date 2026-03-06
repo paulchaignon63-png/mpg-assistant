@@ -480,8 +480,59 @@ export async function getSofascorePlayerStats(
 }
 
 /**
- * Récupère les résultats des matchs terminés (scores par round).
+ * Joueurs ayant pris un carton rouge lors de la dernière journée terminée (SofaScore).
+ * Utilisé comme filet de sécurité pour les suspensions (ex. si Transfermarkt échoue).
  */
+export async function getSofascoreSuspendedFromLastRound(
+  championshipId: number | string
+): Promise<Set<string>> {
+  const tid = getUniqueTournamentId(championshipId);
+  if (tid == null) return new Set();
+
+  const seasonId = await getCurrentSeasonId(tid);
+  if (seasonId == null) return new Set();
+
+  const now = Math.floor(Date.now() / 1000);
+  let lastCompletedRound: number | null = null;
+
+  for (let round = 1; round <= 42; round++) {
+    const eventsData = await fetchJson<{ events?: SofascoreEvent[] }>(
+      `${SOFASCORE_BASE}/unique-tournament/${tid}/season/${seasonId}/events/round/${round}`
+    );
+    const events = (eventsData?.events ?? []).filter(
+      (e) => e.status?.code === 100 && (e.startTimestamp ?? 0) < now
+    );
+    if (events.length > 0) lastCompletedRound = round;
+    if (events.length === 0 && round > 5) break;
+  }
+
+  if (lastCompletedRound == null) return new Set();
+
+  const redCardNames = new Set<string>();
+  const eventsData = await fetchJson<{ events?: SofascoreEvent[] }>(
+    `${SOFASCORE_BASE}/unique-tournament/${tid}/season/${seasonId}/events/round/${lastCompletedRound}`
+  );
+  const events = (eventsData?.events ?? []).filter(
+    (e) => e.status?.code === 100 && (e.startTimestamp ?? 0) < now
+  );
+
+  for (const ev of events) {
+    const incidentsData = await fetchJson<SofascoreIncidentsResponse>(
+      `${SOFASCORE_BASE}/event/${ev.id}/incidents`
+    );
+    for (const inc of incidentsData?.incidents ?? []) {
+      if (inc.incidentType !== "card" || !inc.player?.name) continue;
+      const cardType = (inc.incidentClass ?? "").toLowerCase();
+      if (cardType === "red" || cardType === "yellowred") {
+        redCardNames.add(normalizePlayerName(inc.player.name.trim()));
+      }
+    }
+    await new Promise((r) => setTimeout(r, 80));
+  }
+
+  return redCardNames;
+}
+
 export async function getSofascoreMatchResults(
   championshipId: number | string,
   maxRounds = 20

@@ -883,3 +883,16 @@ export function getRecommendedSubstitutes(
 
   return result;
 }
+
+/**
+ * Propose un capitaine parmi le 11 recommandé : le joueur avec le meilleur score
+ * (celui que l'app estime le plus à même d'avoir une bonne note → bonus MPG).
+ */
+export function getSuggestedCaptain(recommended: EnrichedPlayer[]): EnrichedPlayer | null {
+  if (recommended.length === 0) return null;
+  let best = recommended[0];
+  for (let i = 1; i < recommended.length; i++) {
+    if (recommended[i].recommendationScore > best.recommendationScore) best = recommended[i];
+  }
+  return best;
+}

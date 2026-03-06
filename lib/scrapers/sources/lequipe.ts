@@ -50,6 +50,15 @@ function guessType(title: string): ScrapedNewsItem["type"] {
     return "transfer";
   if (t.includes("équipe type") || t.includes("compo") || t.includes("titulaire"))
     return "lineup";
+  if (
+    t.includes("dans le groupe") ||
+    t.includes("convoqué") ||
+    t.includes("de retour") ||
+    t.includes("retour dans le groupe") ||
+    t.includes("présent dans la liste") ||
+    t.includes("répond présent")
+  )
+    return "in_squad";
   if (t.includes("forme") || t.includes("régulier")) return "form";
   return "other";
 }

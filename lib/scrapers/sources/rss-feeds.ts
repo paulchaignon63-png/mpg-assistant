@@ -77,6 +77,18 @@ function guessType(title: string, description?: string): ScrapedNewsItem["type"]
     t.includes("lineup")
   )
     return "lineup";
+  if (
+    t.includes("dans le groupe") ||
+    t.includes("convoqué") ||
+    t.includes("de retour") ||
+    t.includes("retour dans le groupe") ||
+    t.includes("présent dans la liste") ||
+    t.includes("répond présent") ||
+    t.includes("back in the squad") ||
+    t.includes("named in the squad") ||
+    t.includes("returns to squad")
+  )
+    return "in_squad";
   if (t.includes("forme") || t.includes("régulier") || t.includes("form")) return "form";
   return "other";
 }
