@@ -625,8 +625,11 @@ export function computePlayerScore(
 
   let score = base * adversaryMult * homeAwayMult * fatigueMult * teamFormMult * returnDateMult * advAttackDefenseMult;
 
-  if ((player.redCards ?? 0) > 0) score *= 0.7;
-  else if ((player.yellowCards ?? 0) >= 4) score *= 0.95;
+  const rc = player.redCards ?? 0;
+  if (rc >= 3) score *= 0.82;
+  else if (rc === 2) score *= 0.87;
+  else if (rc === 1) score *= 0.93;
+  if ((player.yellowCards ?? 0) >= 4) score *= 0.95;
   if (player.transferredRecently) score *= 0.92;
   if (newsFormSignals?.negative) score *= 0.95;
 
