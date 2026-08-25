@@ -2,13 +2,15 @@
  * Sonde temporaire de diagnostic pour l'authentification MPG.
  *
  * L'environnement de développement n'a pas accès à mpg.football ; cette route
- * s'exécute sur Vercel, qui y a accès. Elle teste plusieurs variantes de la
- * première étape OIDC et rapporte ce que MPG répond.
+ * s'exécute sur Vercel, qui y a accès.
  *
- * Aucun identifiant réel n'est utilisé ni accepté : le 405 observé survient
- * avant toute vérification des identifiants, des valeurs bidon suffisent donc
- * à distinguer « l'adresse refuse ce type de requête » de « identifiants
- * incorrects ».
+ * Constat des passes précédentes :
+ *  - mpg.football sert désormais une application statique : tout POST reçoit
+ *    un 405 de nginx, l'ancien parcours OIDC ne peut plus fonctionner ;
+ *  - api.mpg.football/user/sign-in est bien vivant (400 sur charge invalide).
+ *
+ * Cette passe lit le JavaScript public du site pour retrouver l'adresse de
+ * connexion réellement utilisée aujourd'hui.
  *
  * À SUPPRIMER une fois le diagnostic terminé.
  */
@@ -16,151 +18,79 @@
 import { NextResponse } from "next/server";
 
 const MPG_WEB_URL = "https://mpg.football";
-const MPG_API_URL = "https://api.mpg.football";
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-const FAKE = { email: "probe@example.invalid", password: "probe-not-a-real-password" };
+/** Motifs révélateurs d'un point d'entrée d'authentification. */
+const PATTERNS: Array<{ label: string; re: RegExp }> = [
+  { label: "api.mpg.football/…", re: /api\.mpg\.football\/[A-Za-z0-9/_.-]{2,60}/g },
+  { label: "connect.ligue1.fr/…", re: /connect\.ligue1\.fr[A-Za-z0-9/_.?=&-]{0,80}/g },
+  { label: "chemins d'auth", re: /["'`]\/(?:user\/)?(?:sign-in|signin|login|auth|oauth|token|authorize)[A-Za-z0-9/_-]{0,40}["'`]/g },
+  { label: "client_id", re: /client_?[Ii]d["'`\s:=]{1,4}["'`][A-Za-z0-9_-]{4,60}["'`]/g },
+  { label: "autres hôtes d'API", re: /https:\/\/[a-z0-9.-]*(?:mpg|ligue1|mlnstats)[a-z0-9.-]*\.[a-z]{2,6}/g },
+];
 
-interface ProbeResult {
-  test: string;
-  url: string;
-  method: string;
-  status?: number;
-  statusText?: string;
-  server?: string | null;
-  contentType?: string | null;
-  /** En-tête que l'étape 1 doit renvoyer quand tout va bien. */
-  remixRedirect?: string | null;
-  location?: string | null;
-  bodyStart?: string;
-  error?: string;
-}
-
-async function probe(
-  test: string,
-  url: string,
-  init: RequestInit & { method: string }
-): Promise<ProbeResult> {
-  try {
-    const res = await fetch(url, { ...init, redirect: "manual" });
-    const text = await res.text().catch(() => "");
-    return {
-      test,
-      url,
-      method: init.method,
-      status: res.status,
-      statusText: res.statusText,
-      server: res.headers.get("server"),
-      contentType: res.headers.get("content-type"),
-      remixRedirect: res.headers.get("x-remix-redirect"),
-      location: res.headers.get("location"),
-      bodyStart: text.slice(0, 400).replace(/\s+/g, " ").trim(),
-    };
-  } catch (err) {
-    return {
-      test,
-      url,
-      method: init.method,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
+async function fetchText(url: string): Promise<string> {
+  const res = await fetch(url, { headers: { "User-Agent": BROWSER_UA } });
+  if (!res.ok) return "";
+  return res.text();
 }
 
 export async function GET() {
-  const form = new URLSearchParams();
-  form.set("email", FAKE.email);
-  form.set("password", FAKE.password);
+  const found: Record<string, Set<string>> = {};
+  for (const p of PATTERNS) found[p.label] = new Set<string>();
 
-  const postHeaders = {
-    "Content-Type": "application/x-www-form-urlencoded",
-    "User-Agent": BROWSER_UA,
-    Accept: "*/*",
-    "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-    Origin: MPG_WEB_URL,
-    Referer: `${MPG_WEB_URL}/auth`,
-  };
+  const scanned: string[] = [];
+  const errors: string[] = [];
 
-  const dataParam = "routes/__home/__auth/auth";
-  const amplitude = "00000000-0000-4000-8000-000000000000";
-
-  const results = await Promise.all([
-    // 0. La lambda joint-elle simplement le site ?
-    probe("0-accueil", `${MPG_WEB_URL}/`, {
-      method: "GET",
-      headers: { "User-Agent": BROWSER_UA },
-    }),
-    // 1. La page de connexion existe-t-elle en GET ?
-    probe("1-page-auth-GET", `${MPG_WEB_URL}/auth`, {
-      method: "GET",
-      headers: { "User-Agent": BROWSER_UA },
-    }),
-    // 2. La requête telle que l'app la fait aujourd'hui (slashes non encodés)
-    probe(
-      "2-etape1-actuelle",
-      `${MPG_WEB_URL}/auth?_data=${dataParam}&ext-amplitudeId=${amplitude}`,
-      { method: "POST", headers: postHeaders, body: form.toString() }
-    ),
-    // 3. Même chose mais avec le paramètre _data encodé
-    probe(
-      "3-etape1-data-encode",
-      `${MPG_WEB_URL}/auth?_data=${encodeURIComponent(dataParam)}&ext-amplitudeId=${amplitude}`,
-      { method: "POST", headers: postHeaders, body: form.toString() }
-    ),
-    // 4. Sans aucun paramètre de requête
-    probe("4-etape1-sans-params", `${MPG_WEB_URL}/auth`, {
-      method: "POST",
-      headers: postHeaders,
-      body: form.toString(),
-    }),
-    // 5. Convention Remix v2 (points au lieu de doubles tirets bas)
-    probe(
-      "5-etape1-remix-v2",
-      `${MPG_WEB_URL}/auth?_data=routes%2F_home._auth.auth&ext-amplitudeId=${amplitude}`,
-      { method: "POST", headers: postHeaders, body: form.toString() }
-    ),
-    // 6. Sans User-Agent navigateur, pour isoler l'effet du filtrage
-    probe(
-      "6-etape1-sans-UA",
-      `${MPG_WEB_URL}/auth?_data=${dataParam}&ext-amplitudeId=${amplitude}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: form.toString(),
+  function scan(text: string) {
+    for (const p of PATTERNS) {
+      for (const m of text.matchAll(p.re)) {
+        const v = m[0].replace(/^["'`]|["'`]$/g, "");
+        if (found[p.label].size < 60) found[p.label].add(v);
       }
-    ),
-    // 7. L'API répond-elle ? C'est elle que l'app utilise pour toutes les données.
-    probe("7-api-racine", `${MPG_API_URL}/`, {
-      method: "GET",
-      headers: { "User-Agent": BROWSER_UA },
-    }),
-    // 8. LE point clé : que dit vraiment le 403 de /user/sign-in ?
-    //    Le code bascule sur l'OIDC dès qu'il voit 403 sans lire la réponse.
-    probe("8-api-sign-in", `${MPG_API_URL}/user/sign-in`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "User-Agent": BROWSER_UA,
-        Accept: "application/json",
-        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-        Origin: MPG_WEB_URL,
-        Referer: `${MPG_WEB_URL}/`,
-      },
-      body: JSON.stringify({ login: FAKE.email, password: FAKE.password, language: "fr-FR" }),
-    }),
-    // 9. Même appel dépouillé, pour voir si les en-têtes changent la réponse
-    probe("9-api-sign-in-nu", `${MPG_API_URL}/user/sign-in`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ login: FAKE.email, password: FAKE.password, language: "fr-FR" }),
-    }),
-  ]);
+    }
+  }
+
+  let html = "";
+  try {
+    html = await fetchText(`${MPG_WEB_URL}/auth`);
+    scan(html);
+  } catch (err) {
+    errors.push(`html: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // Adresses des bundles JavaScript référencés par la page
+  const scriptUrls = new Set<string>();
+  for (const m of html.matchAll(/(?:src|href)=["']([^"']+\.js[^"']*)["']/g)) {
+    const raw = m[1];
+    scriptUrls.add(raw.startsWith("http") ? raw : `${MPG_WEB_URL}${raw.startsWith("/") ? "" : "/"}${raw}`);
+  }
+
+  // Les bundles principaux d'abord, et on borne pour rester raisonnable
+  const targets = Array.from(scriptUrls).slice(0, 12);
+  for (const url of targets) {
+    try {
+      const js = await fetchText(url);
+      if (js) {
+        scanned.push(`${url} (${Math.round(js.length / 1024)} ko)`);
+        scan(js);
+      }
+    } catch (err) {
+      errors.push(`${url}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   return NextResponse.json(
     {
-      note: "Sonde de diagnostic. Aucun identifiant réel n'est utilisé. À supprimer après usage.",
+      note: "Sonde de diagnostic — lecture du JavaScript public de MPG. À supprimer après usage.",
       date: new Date().toISOString(),
-      results,
+      scriptsTrouves: scriptUrls.size,
+      scriptsLus: scanned,
+      erreurs: errors,
+      resultats: Object.fromEntries(
+        Object.entries(found).map(([k, v]) => [k, Array.from(v)])
+      ),
     },
     { headers: { "Cache-Control": "no-store" } }
   );
