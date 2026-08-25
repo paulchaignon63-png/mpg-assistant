@@ -819,3 +819,95 @@ export async function getSofascoreLineupHistory(
   }
   return records;
 }
+
+/** Un joueur du vivier d'un championnat, pour la composition manuelle d'effectif. */
+export interface RosterPlayer {
+  /** Identifiant Sofascore, stable, sert de clé côté effectif manuel. */
+  id: string;
+  name: string;
+  club: string;
+  /** Poste normalisé : G, D, M, A. */
+  position: "G" | "D" | "M" | "A";
+}
+
+/** Mappe le poste Sofascore (G/D/M/F) vers la convention interne (G/D/M/A). */
+function mapSofascorePosition(pos: string | undefined): "G" | "D" | "M" | "A" {
+  switch ((pos ?? "").toUpperCase()) {
+    case "G":
+      return "G";
+    case "D":
+      return "D";
+    case "M":
+      return "M";
+    case "F":
+      return "A";
+    default:
+      return "M";
+  }
+}
+
+interface SofascoreTeamPlayerRow {
+  player?: { id?: number; name?: string; position?: string };
+}
+
+interface SofascoreTeamPlayersResponse {
+  players?: SofascoreTeamPlayerRow[];
+}
+
+interface SofascoreStandingsTeamRow {
+  team?: { id?: number; name?: string };
+}
+
+/**
+ * Construit le vivier complet d'un championnat (nom, club, poste par joueur),
+ * sans aucune authentification MPG : classement Sofascore → clubs, puis
+ * effectif de chaque club. Le club provient d'une source faisant autorité,
+ * donc le filtre par club est fiable (pas de rapprochement de noms).
+ *
+ * Coût : 1 requête classement + 1 par club (~18-20). Résultat volumineux mais
+ * stable sur une saison → à mettre en cache par l'appelant.
+ */
+export async function getChampionshipRoster(
+  championshipId: number | string
+): Promise<RosterPlayer[]> {
+  const tid = getUniqueTournamentId(championshipId);
+  if (tid == null) return [];
+  const seasonId = await getCurrentSeasonId(tid);
+  if (seasonId == null) return [];
+
+  const standings = await fetchJson<{
+    standings?: Array<{ rows?: SofascoreStandingsTeamRow[] }>;
+  }>(`${SOFASCORE_BASE}/unique-tournament/${tid}/season/${seasonId}/standings/total`);
+
+  const teams = (standings?.standings?.[0]?.rows ?? [])
+    .map((r) => r.team)
+    .filter((t): t is { id?: number; name?: string } => !!t && t.id != null && !!t.name);
+
+  const roster: RosterPlayer[] = [];
+  const seen = new Set<string>();
+
+  for (const team of teams) {
+    const clubName = team.name!;
+    const data = await fetchJson<SofascoreTeamPlayersResponse>(
+      `${SOFASCORE_BASE}/team/${team.id}/players`
+    );
+    for (const row of data?.players ?? []) {
+      const p = row.player;
+      const name = p?.name?.trim();
+      if (!p?.id || !name) continue;
+      const id = `sofa_${p.id}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      roster.push({
+        id,
+        name,
+        club: clubName,
+        position: mapSofascorePosition(p.position),
+      });
+    }
+    await new Promise((r) => setTimeout(r, 60));
+  }
+
+  roster.sort((a, b) => a.club.localeCompare(b.club) || a.name.localeCompare(b.name));
+  return roster;
+}
