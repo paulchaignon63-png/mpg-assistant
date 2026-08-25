@@ -280,6 +280,7 @@ interface MpgStatsEvent {
   i?: number; // id
   dB?: number; // coup d'envoi (timestamp s)
   d?: number; // numéro de journée
+  s?: number; // id de saison
 }
 
 interface MpgStatsFullRow extends MpgStatsRosterPlayer {
@@ -335,6 +336,7 @@ export async function getChampionshipData(
     .filter((e) => e.dB != null && e.dB > now)
     .sort((a, b) => (a.dB ?? 0) - (b.dB ?? 0));
   const nextKickoff = future[0]?.dB;
+  const currentSeason = future[0]?.s;
   const upcomingEventIds = new Set<number>();
   let nextMatchDate: Date | undefined;
   if (nextKickoff != null) {
@@ -345,10 +347,18 @@ export async function getChampionshipData(
     }
   }
 
-  // Journées déjà jouées = plus grand numéro de journée passé.
+  // Journées déjà jouées de la SAISON EN COURS uniquement (le fichier contient
+  // aussi les saisons passées, dont les journées vont jusqu'à 34-38).
   let playedRounds = 0;
   for (const e of data.e ?? []) {
-    if (e.dB != null && e.dB <= now && e.d != null) playedRounds = Math.max(playedRounds, e.d);
+    if (
+      e.dB != null &&
+      e.dB <= now &&
+      e.d != null &&
+      (currentSeason == null || e.s === currentSeason)
+    ) {
+      playedRounds = Math.max(playedRounds, e.d);
+    }
   }
 
   const players = new Map<string, MpgStatsFullPlayer>();
