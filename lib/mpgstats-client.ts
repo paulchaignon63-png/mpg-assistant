@@ -191,6 +191,8 @@ interface MpgStatsClub {
   i?: number;
   n?: string;
   rn?: string;
+  el?: number; // note Elo (force de l'équipe, robuste dès le début de saison)
+  s?: { w?: number; l?: number; d?: number; p?: number; GS?: number; GA?: number };
 }
 
 interface MpgStatsRosterPlayer {
@@ -259,6 +261,14 @@ export interface MpgStatsFullPlayer extends RosterPlayer {
   quotation?: number;
   status: "ok" | "injured" | "suspended" | "doubtful";
   statusReason?: string;
+  /** Contexte du prochain match (adversaire, domicile), pour le scoring. */
+  nextOpponentRank?: number;
+  isHome?: boolean;
+  opponentGoalsFor?: number;
+  opponentGoalsAgainst?: number;
+  teamFormWinsLast5?: number;
+  /** Pour l'affichage. */
+  nextOpponentName?: string;
 }
 
 /** Résultat complet d'un championnat : joueurs enrichis + date du prochain match. */
@@ -267,6 +277,8 @@ export interface ChampionshipData {
   nextMatchDate?: Date;
   /** Nombre de journées déjà jouées (pour la régularité). */
   playedRounds: number;
+  /** Nombre d'équipes du championnat. */
+  totalTeams: number;
 }
 
 interface MpgStatsForfait {
@@ -281,6 +293,8 @@ interface MpgStatsEvent {
   dB?: number; // coup d'envoi (timestamp s)
   d?: number; // numéro de journée
   s?: number; // id de saison
+  t1?: number; // club à domicile
+  t2?: number; // club à l'extérieur
 }
 
 interface MpgStatsFullRow extends MpgStatsRosterPlayer {
@@ -317,13 +331,13 @@ export async function getChampionshipData(
 ): Promise<ChampionshipData> {
   const slug = getLeagueSlug(championshipId);
   const res = await fetch(`${MPGSTATS_URL}/leagues/${slug}_v2.json`);
-  if (!res.ok) return { players: new Map(), playedRounds: 0 };
+  if (!res.ok) return { players: new Map(), playedRounds: 0, totalTeams: 18 };
 
   const data = (await res.json()) as {
     p?: MpgStatsFullRow[];
     c?: MpgStatsClub[];
     e?: MpgStatsEvent[];
-    mL?: { aS?: { i?: number; cD?: { lD?: number } } };
+    mL?: { aS?: { i?: number; cD?: { lD?: number }; c?: number[] } };
   };
 
   const clubNameById = new Map<number, string>();
@@ -368,6 +382,55 @@ export async function getChampionshipData(
     }
   }
 
+  // --- Contexte par club : classement + prochain adversaire ---------------
+  // Le rang mesure la force de l'adversaire ; en début de saison les points
+  // sont presque tous nuls, donc l'Elo (qui se reporte d'une saison à l'autre)
+  // départage et donne un classement crédible dès la 1re journée.
+  const clubById = new Map<number, MpgStatsClub>();
+  for (const club of data.c ?? []) if (club.i != null) clubById.set(club.i, club);
+
+  const currentClubIds = (data.mL?.aS?.c ?? []).filter((id) => clubById.has(id));
+  const totalTeams = currentClubIds.length || 18;
+
+  const ranked = [...currentClubIds].sort((a, b) => {
+    const ca = clubById.get(a)!;
+    const cb = clubById.get(b)!;
+    const pa = ca.s?.p ?? 0;
+    const pb = cb.s?.p ?? 0;
+    if (pb !== pa) return pb - pa;
+    const gda = (ca.s?.GS ?? 0) - (ca.s?.GA ?? 0);
+    const gdb = (cb.s?.GS ?? 0) - (cb.s?.GA ?? 0);
+    if (gdb !== gda) return gdb - gda;
+    return (cb.el ?? 0) - (ca.el ?? 0);
+  });
+  const rankByClub = new Map<number, number>();
+  ranked.forEach((id, i) => rankByClub.set(id, i + 1));
+
+  // Prochain adversaire de chaque club (1er match à venir de la saison en cours).
+  const nextOppByClub = new Map<number, { oppId: number; isHome: boolean }>();
+  for (const e of future) {
+    if (e.t1 == null || e.t2 == null) continue;
+    if (!nextOppByClub.has(e.t1)) nextOppByClub.set(e.t1, { oppId: e.t2, isHome: true });
+    if (!nextOppByClub.has(e.t2)) nextOppByClub.set(e.t2, { oppId: e.t1, isHome: false });
+  }
+
+  function contextForClub(clubId: number | undefined) {
+    if (clubId == null) return undefined;
+    const next = nextOppByClub.get(clubId);
+    const club = clubById.get(clubId);
+    const teamFormWinsLast5 = club?.s?.w != null ? Math.min(5, club.s.w) : undefined;
+    if (!next) return { teamFormWinsLast5 };
+    const opp = clubById.get(next.oppId);
+    return {
+      nextOpponentRank: rankByClub.get(next.oppId),
+      isHome: next.isHome,
+      opponentGoalsFor: opp?.s?.GS,
+      opponentGoalsAgainst: opp?.s?.GA,
+      teamFormWinsLast5,
+      nextOpponentName: opp?.n ?? opp?.rn,
+    };
+  }
+
   const players = new Map<string, MpgStatsFullPlayer>();
   for (const p of data.p ?? []) {
     if (p.i == null) continue;
@@ -399,6 +462,7 @@ export async function getChampionshipData(
     }
 
     const { status, reason } = statusFromForfaits(p.fo, upcomingEventIds);
+    const ctx = contextForClub(p.c);
 
     players.set(`mpg_${p.i}`, {
       id: `mpg_${p.i}`,
@@ -416,8 +480,14 @@ export async function getChampionshipData(
       quotation: p.q,
       status,
       statusReason: reason,
+      nextOpponentRank: ctx?.nextOpponentRank,
+      isHome: ctx?.isHome,
+      opponentGoalsFor: ctx?.opponentGoalsFor,
+      opponentGoalsAgainst: ctx?.opponentGoalsAgainst,
+      teamFormWinsLast5: ctx?.teamFormWinsLast5,
+      nextOpponentName: ctx?.nextOpponentName,
     });
   }
 
-  return { players, nextMatchDate, playedRounds };
+  return { players, nextMatchDate, playedRounds, totalTeams };
 }

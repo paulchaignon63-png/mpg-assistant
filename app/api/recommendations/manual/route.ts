@@ -33,7 +33,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { players, nextMatchDate, playedRounds } = await getChampionshipData(championshipId);
+    const { players, nextMatchDate, playedRounds, totalTeams } = await getChampionshipData(championshipId);
     if (players.size === 0) {
       return NextResponse.json({ error: "Données du championnat indisponibles" }, { status: 502 });
     }
@@ -61,6 +61,11 @@ export async function POST(request: Request) {
       last5Minutes: p.last5Minutes,
       last5OpponentRounds: p.last5OpponentRounds,
       quotation: p.quotation,
+      nextOpponentRank: p.nextOpponentRank,
+      isHome: p.isHome,
+      opponentGoalsFor: p.opponentGoalsFor,
+      opponentGoalsAgainst: p.opponentGoalsAgainst,
+      teamFormWinsLast5: p.teamFormWinsLast5,
       isInjured: p.status === "injured",
       isSuspended: p.status === "suspended",
       isDoubtful: p.status === "doubtful",
@@ -75,7 +80,7 @@ export async function POST(request: Request) {
       poolPlayers,
       {
         championshipDays: Math.max(1, playedRounds),
-        totalTeams: 18,
+        totalTeams,
         nextMatchDate,
       }
     );
@@ -89,7 +94,13 @@ export async function POST(request: Request) {
       const s =
         (p.id ? statusById.get(p.id) : undefined) ??
         (p.name ? statusByName.get(p.name) : undefined);
-      return { ...p, statusReason: s?.statusReason, statusKind: s?.status };
+      return {
+        ...p,
+        statusReason: s?.statusReason,
+        statusKind: s?.status,
+        nextOpponentName: s?.nextOpponentName,
+        isHome: s?.isHome,
+      };
     };
 
     return NextResponse.json({
