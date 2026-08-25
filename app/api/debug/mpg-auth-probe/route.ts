@@ -1,84 +1,124 @@
 /**
  * Sonde temporaire de diagnostic pour l'authentification MPG.
  *
- * L'environnement de développement n'a pas accès à mpg.football ; cette route
- * s'exécute sur Vercel, qui y a accès.
- *
  * Constat des passes précédentes :
- *  - mpg.football sert désormais une application statique : tout POST reçoit
- *    un 405 de nginx, l'ancien parcours OIDC ne peut plus fonctionner ;
- *  - api.mpg.football/user/sign-in est bien vivant (400 sur charge invalide).
+ *  - mpg.football est une application Expo statique (tout POST → 405 nginx) ;
+ *  - api.mpg.football/user/sign-in est vivant mais refuse (403) ;
+ *  - le site s'authentifie via Auth0 (fournisseur d'identité de Ligue 1).
  *
- * Cette passe lit le JavaScript public du site pour retrouver l'adresse de
- * connexion réellement utilisée aujourd'hui.
+ * Configuration extraite du bundle public :
+ *   domaine   : connect.ligue1.fr
+ *   audience  : https://mpg.ligue1.fr
+ *   client web: XNNUupMREjh0ULck1InJRC6gb8kyMfdg
+ *   client app: MPSvFrsiwRmRr36YFQ7cI2P5RgxddoDK
+ *
+ * Cette passe teste si l'échange direct « identifiant + mot de passe → jeton »
+ * est ouvert. Aucun identifiant réel n'est utilisé : la réponse d'Auth0
+ * distingue « mode ouvert, identifiants invalides » de « mode fermé » sans
+ * qu'un vrai mot de passe soit nécessaire.
  *
  * À SUPPRIMER une fois le diagnostic terminé.
  */
 
 import { NextResponse } from "next/server";
 
-const MPG_WEB_URL = "https://mpg.football";
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-/** Mots-clés dont on veut lire le contexte dans le bundle. */
-const KEYWORDS = ["AUTH0_AUDIENCE", "AUTH0_CLIENT", "AUTH0_NATIVE_DOMAIN"];
+const AUTH0_DOMAIN = "https://connect.ligue1.fr";
+const AUDIENCE = "https://mpg.ligue1.fr";
+const SCOPE = "openid profile email offline_access";
+const NATIVE_CLIENT_ID = "MPSvFrsiwRmRr36YFQ7cI2P5RgxddoDK";
+const WEB_CLIENT_ID = "XNNUupMREjh0ULck1InJRC6gb8kyMfdg";
 
-/** Motifs révélateurs d'un point d'entrée d'authentification. */
-const PATTERNS: Array<{ label: string; re: RegExp }> = [
-  { label: "api.mpg.football/…", re: /api\.mpg\.football\/[A-Za-z0-9/_.-]{2,60}/g },
-  { label: "connect.ligue1.fr/…", re: /connect\.ligue1\.fr[A-Za-z0-9/_.?=&-]{0,80}/g },
-  { label: "chemins d'auth", re: /["'`]\/(?:user\/)?(?:sign-in|signin|login|auth|oauth|token|authorize)[A-Za-z0-9/_-]{0,40}["'`]/g },
-  { label: "client_id", re: /client_?[Ii]d["'`\s:=]{1,4}["'`][A-Za-z0-9_-]{4,60}["'`]/g },
-  { label: "autres hôtes d'API", re: /https:\/\/[a-z0-9.-]*(?:mpg|ligue1|mlnstats)[a-z0-9.-]*\.[a-z]{2,6}/g },
-];
+const FAKE_USER = "probe.diagnostic@example.com";
+const FAKE_PASS = "not-a-real-password-000";
 
-async function fetchText(url: string): Promise<string> {
-  const res = await fetch(url, { headers: { "User-Agent": BROWSER_UA } });
-  if (!res.ok) return "";
-  return res.text();
+interface GrantResult {
+  test: string;
+  status?: number;
+  reponse?: string;
+  erreur?: string;
+}
+
+async function tryGrant(
+  label: string,
+  payload: Record<string, string>
+): Promise<GrantResult> {
+  try {
+    const res = await fetch(`${AUTH0_DOMAIN}/oauth/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "User-Agent": BROWSER_UA },
+      body: JSON.stringify(payload),
+    });
+    const text = await res.text();
+    return { test: label, status: res.status, reponse: text.slice(0, 300) };
+  } catch (err) {
+    return { test: label, erreur: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 export async function GET() {
-  const html = await fetchText(`${MPG_WEB_URL}/auth`).catch(() => "");
+  const results: GrantResult[] = [];
 
-  const scriptUrls: string[] = [];
-  for (const m of html.matchAll(/(?:src|href)=["']([^"']+\.js[^"']*)["']/g)) {
-    const raw = m[1];
-    scriptUrls.push(raw.startsWith("http") ? raw : `${MPG_WEB_URL}${raw.startsWith("/") ? "" : "/"}${raw}`);
+  // Configuration publique du fournisseur : dit quels modes sont supportés.
+  try {
+    const res = await fetch(`${AUTH0_DOMAIN}/.well-known/openid-configuration`, {
+      headers: { "User-Agent": BROWSER_UA },
+    });
+    const json = (await res.json()) as Record<string, unknown>;
+    results.push({
+      test: "0-configuration-publique",
+      status: res.status,
+      reponse: JSON.stringify({
+        issuer: json.issuer,
+        token_endpoint: json.token_endpoint,
+        grant_types_supported: json.grant_types_supported,
+      }),
+    });
+  } catch (err) {
+    results.push({ test: "0-configuration-publique", erreur: String(err) });
   }
 
-  const extraits: Record<string, string[]> = {};
-  for (const k of KEYWORDS) extraits[k] = [];
-  const lus: string[] = [];
-
-  for (const url of scriptUrls.slice(0, 6)) {
-    let js = "";
-    try {
-      js = await fetchText(url);
-    } catch {
-      continue;
-    }
-    if (!js) continue;
-    lus.push(`${url.split("/").pop()} (${Math.round(js.length / 1024)} ko)`);
-
-    for (const k of KEYWORDS) {
-      let from = 0;
-      while (extraits[k].length < 3) {
-        const i = js.indexOf(k, from);
-        if (i === -1) break;
-        extraits[k].push(js.slice(Math.max(0, i - 420), i + 320).replace(/\s+/g, " "));
-        from = i + k.length;
-      }
-    }
-  }
+  results.push(
+    await tryGrant("1-mot-de-passe-client-mobile", {
+      grant_type: "password",
+      username: FAKE_USER,
+      password: FAKE_PASS,
+      audience: AUDIENCE,
+      scope: SCOPE,
+      client_id: NATIVE_CLIENT_ID,
+    })
+  );
+  results.push(
+    await tryGrant("2-mot-de-passe-client-web", {
+      grant_type: "password",
+      username: FAKE_USER,
+      password: FAKE_PASS,
+      audience: AUDIENCE,
+      scope: SCOPE,
+      client_id: WEB_CLIENT_ID,
+    })
+  );
+  results.push(
+    await tryGrant("3-mot-de-passe-realm", {
+      grant_type: "http://auth0.com/oauth/grant-type/password-realm",
+      realm: "Username-Password-Authentication",
+      username: FAKE_USER,
+      password: FAKE_PASS,
+      audience: AUDIENCE,
+      scope: SCOPE,
+      client_id: NATIVE_CLIENT_ID,
+    })
+  );
 
   return NextResponse.json(
     {
-      note: "Sonde de diagnostic — contexte des mots-clés d'authentification. À supprimer après usage.",
+      note: "Sonde de diagnostic — aucun identifiant réel. À supprimer après usage.",
+      lecture:
+        "invalid_grant / 'Wrong email or password' = mode OUVERT (il ne manque que de vrais identifiants). unauthorized_client / unsupported = mode FERMÉ.",
       date: new Date().toISOString(),
-      bundlesLus: lus,
-      extraits,
+      results,
     },
     { headers: { "Cache-Control": "no-store" } }
   );
