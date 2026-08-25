@@ -4,6 +4,7 @@
  */
 
 import type { UserSignIn } from "@/types/mpg";
+import { mpgBrowserHeaders, mpgPageHeaders } from "./mpg-headers";
 
 const MPG_WEB_URL = "https://mpg.football";
 const LIGUE1_CONNECT_URL = "https://connect.ligue1.fr";
@@ -51,7 +52,11 @@ export async function signInOidc(login: string, password: string): Promise<UserS
     `${MPG_WEB_URL}/auth?_data=routes/__home/__auth/auth&ext-amplitudeId=${amplitudeId}`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: mpgBrowserHeaders({
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: MPG_WEB_URL,
+        Referer: `${MPG_WEB_URL}/auth`,
+      }),
       body: form1.toString(),
       redirect: "manual",
     }
@@ -59,8 +64,16 @@ export async function signInOidc(login: string, password: string): Promise<UserS
 
   const redirectHeader = res1.headers.get("x-remix-redirect");
   if (!redirectHeader) {
-    const text = await res1.text();
-    throw new Error(`OIDC step 1 failed: no redirect. ${text.slice(0, 200)}`);
+    // Message lisible côté UI : l'utilisateur voyait jusqu'ici la page
+    // d'erreur HTML brute renvoyée par le serveur de MPG.
+    if (res1.status === 405 || res1.status === 403 || res1.status === 429) {
+      throw new Error(
+        `MPG a refusé la connexion (erreur ${res1.status}). Leur service bloque la requête ; réessaie dans quelques minutes.`
+      );
+    }
+    throw new Error(
+      `Connexion à MPG impossible (étape 1, statut ${res1.status}). Leur page de connexion a peut-être changé.`
+    );
   }
 
   const redirectUrl = redirectHeader.replace(
@@ -72,7 +85,7 @@ export async function signInOidc(login: string, password: string): Promise<UserS
   // --- Step 2: Follow redirect to Ligue1 ---
   const res2 = await fetch(url1.toString(), {
     redirect: "manual",
-    headers: { Cookie: joinCookies(getSetCookieHeaders(res1)) },
+    headers: mpgPageHeaders({ Cookie: joinCookies(getSetCookieHeaders(res1)) }),
   });
 
   if (res2.status !== 302 && res2.status !== 303) {
@@ -102,10 +115,12 @@ export async function signInOidc(login: string, password: string): Promise<UserS
     `${LIGUE1_CONNECT_URL}${path3}${query3 ? `?${query3}` : ""}`,
     {
       method: "POST",
-      headers: {
+      headers: mpgBrowserHeaders({
         "Content-Type": "application/x-www-form-urlencoded",
         Cookie: cookies2,
-      },
+        Origin: LIGUE1_CONNECT_URL,
+        Referer: fullLoginUrl,
+      }),
       body: form3.toString(),
       redirect: "manual",
     }
@@ -128,7 +143,7 @@ export async function signInOidc(login: string, password: string): Promise<UserS
   const res4 = await fetch(
     `${resumeUri.origin}${resumeUri.pathname}${resumeUri.search}`,
     {
-      headers: { Cookie: cookies3 },
+      headers: mpgPageHeaders({ Cookie: cookies3 }),
       redirect: "manual",
     }
   );
@@ -145,7 +160,11 @@ export async function signInOidc(login: string, password: string): Promise<UserS
 
   const res5 = await fetch(`${MPG_WEB_URL}/auth/callback`, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers: mpgBrowserHeaders({
+      "Content-Type": "application/x-www-form-urlencoded",
+      Origin: MPG_WEB_URL,
+      Referer: `${MPG_WEB_URL}/auth`,
+    }),
     body: form5.toString(),
     redirect: "manual",
   });
@@ -162,7 +181,7 @@ export async function signInOidc(login: string, password: string): Promise<UserS
 
   // --- Step 6: GET dashboard to extract token ---
   const res6 = await fetch(`${MPG_WEB_URL}/dashboard?_data=root`, {
-    headers: { Cookie: `__session=${session}` },
+    headers: mpgBrowserHeaders({ Cookie: `__session=${session}` }),
   });
 
   if (!res6.ok) {
@@ -195,7 +214,7 @@ export async function signInOidc(login: string, password: string): Promise<UserS
   let userId = (data.userId ?? data.id ?? "") as string;
   if (!userId) {
     const userRes = await fetch("https://api.mpg.football/user", {
-      headers: { Authorization: token },
+      headers: mpgBrowserHeaders({ Authorization: token }),
     });
     if (userRes.ok) {
       const userData = (await userRes.json()) as { id?: string };

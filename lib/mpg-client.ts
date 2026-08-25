@@ -11,6 +11,7 @@ import type {
   Coach,
 } from "@/types/mpg";
 import { signInOidc } from "./mpg-oidc";
+import { mpgBrowserHeaders } from "./mpg-headers";
 
 const MPG_API_URL = "https://api.mpg.football";
 
@@ -109,7 +110,7 @@ export class MpgClient {
     // 1. Essai auth simple (comptes avant fév 2025)
     const res = await fetch(`${MPG_API_URL}/user/sign-in`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: mpgBrowserHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         login,
         password,
@@ -143,10 +144,10 @@ export class MpgClient {
 
   private getHeaders(): HeadersInit {
     if (!this.token) throw new Error("Not authenticated");
-    return {
+    return mpgBrowserHeaders({
       Authorization: this.token,
       "Content-Type": "application/json",
-    };
+    });
   }
 
   async getDashboard(): Promise<Dashboard> {
