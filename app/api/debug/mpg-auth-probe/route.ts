@@ -22,16 +22,7 @@ const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 /** Mots-clés dont on veut lire le contexte dans le bundle. */
-const KEYWORDS = [
-  "oauth/token",
-  "oauth/revoke",
-  "client_id",
-  "clientId",
-  "grant_type",
-  "connect.ligue1",
-  "redirect_uri",
-  "authorize",
-];
+const KEYWORDS = ["AUTH0_AUDIENCE", "AUTH0_CLIENT", "AUTH0_NATIVE_DOMAIN"];
 
 /** Motifs révélateurs d'un point d'entrée d'authentification. */
 const PATTERNS: Array<{ label: string; re: RegExp }> = [
@@ -73,10 +64,10 @@ export async function GET() {
 
     for (const k of KEYWORDS) {
       let from = 0;
-      while (extraits[k].length < 6) {
+      while (extraits[k].length < 3) {
         const i = js.indexOf(k, from);
         if (i === -1) break;
-        extraits[k].push(js.slice(Math.max(0, i - 90), i + 130).replace(/\s+/g, " "));
+        extraits[k].push(js.slice(Math.max(0, i - 420), i + 320).replace(/\s+/g, " "));
         from = i + k.length;
       }
     }
