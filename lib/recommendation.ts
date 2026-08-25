@@ -621,9 +621,15 @@ export function computePlayerScore(
   if (player.transferredRecently) score *= 0.92;
   if (newsFormSignals?.negative) score *= 0.95;
 
+  // Pénalité « peu de matchs joués » : évite de titulariser un joueur à 1 match
+  // quand d'autres en ont 15. Mais le seuil doit rester cohérent avec l'avancée
+  // de la saison — en début de championnat personne n'a joué 5 matchs, pénaliser
+  // sur un seuil fixe écraserait tout le monde. On plafonne donc le seuil au
+  // nombre de journées déjà disputées.
   const m = player.matchs ?? 0;
-  if (!useStarMode && m > 0 && m < MIN_MATCHES_FOR_STARTER) {
-    score *= m / MIN_MATCHES_FOR_STARTER;
+  const effectiveMinMatches = Math.min(MIN_MATCHES_FOR_STARTER, Math.max(0, days));
+  if (!useStarMode && m > 0 && effectiveMinMatches > 0 && m < effectiveMinMatches) {
+    score *= m / effectiveMinMatches;
   }
 
   return Math.round(toTenScale(Math.max(0, score)) * 100) / 100;
