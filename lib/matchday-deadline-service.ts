@@ -117,7 +117,7 @@ export async function getMatchdayDeadline(
       return {
         deadline,
         firstMatchDate: footMercato.firstMatchDate,
-        gameWeek: footMercato.gameWeek,
+        // Foot Mercato n'expose pas de numéro de journée fiable (cf. le scraper).
         source: "footmercato",
       };
     }

@@ -4,10 +4,12 @@
  *
  * Fallback : L'Equipe n'a pas de calendrier structuré type fixtures.
  * On cherche des patterns de date dans les articles (ex. "17 août", "week-end du 3 janvier").
+ * Les dates lues sont en heure de Paris (cf. lib/paris-time).
  */
 
 import * as cheerio from "cheerio";
 import { fetchHtml } from "../base-scraper";
+import { parisDateToUtc } from "../../paris-time";
 
 const MONTHS_FR: Record<string, number> = {
   janvier: 1,
@@ -48,7 +50,8 @@ function parseDateFromMatch(
   const month = MONTHS_FR[monthKey.toLowerCase()];
   const year = parseInt(match[3], 10);
   if (month && day >= 1 && day <= 31) {
-    return new Date(year, month - 1, day, defaultHour, 0, 0);
+    // Les dates de L'Equipe sont en heure de Paris.
+    return parisDateToUtc(year, month, day, defaultHour, 0);
   }
   return null;
 }

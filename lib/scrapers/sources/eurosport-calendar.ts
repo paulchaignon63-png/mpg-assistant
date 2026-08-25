@@ -3,10 +3,12 @@
  * https://www.eurosport.fr/football/ligue-1/
  *
  * Fallback : page peut être géo-restreinte.
+ * Les horaires de la page sont en heure de Paris (cf. lib/paris-time).
  */
 
 import * as cheerio from "cheerio";
 import { fetchHtml } from "../base-scraper";
+import { parisDateToUtc } from "../../paris-time";
 
 const MONTHS_FR: Record<string, number> = {
   janvier: 1,
@@ -36,7 +38,13 @@ export interface EurosportCalendarResult {
   gameWeek?: number;
 }
 
-function parseFrenchDate(text: string): Date | null {
+interface FrenchDateParts {
+  year: number;
+  month: number; // 1-indexé
+  day: number;
+}
+
+function parseFrenchDate(text: string): FrenchDateParts | null {
   const match = text.match(
     /(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+(\d{1,2})\s+(janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre)\s+(\d{4})/i
   );
@@ -45,7 +53,7 @@ function parseFrenchDate(text: string): Date | null {
   const month = MONTHS_FR[match[2].toLowerCase()];
   const year = parseInt(match[3], 10);
   if (!month || day < 1 || day > 31) return null;
-  return new Date(year, month - 1, day);
+  return { year, month, day };
 }
 
 function parseTime(text: string): { hours: number; minutes: number } | null {
@@ -70,36 +78,39 @@ export async function scrapeEurosportNextMatchday(
     const html = await fetchHtml(url);
     const $ = cheerio.load(html);
     const now = new Date();
-    let currentDate: Date | null = null;
-    let firstTime: { hours: number; minutes: number } | null = null;
+    let currentDate: FrenchDateParts | null = null;
 
     const text = $("body").text();
     const lines = text.split(/\n/).map((l) => l.trim()).filter(Boolean);
 
+    // On retient le coup d'envoi à venir le plus proche, quel que soit
+    // l'ordre d'affichage des dates sur la page.
+    let firstMatchDate: Date | null = null;
+
     for (const line of lines) {
       const d = parseFrenchDate(line);
-      if (d && d >= now) currentDate = d;
+      if (d) {
+        currentDate = d;
+        continue;
+      }
+
+      if (!currentDate) continue;
 
       const t = parseTime(line);
-      if (t && currentDate) {
-        firstTime = t;
-        break;
-      }
+      if (!t) continue;
+
+      const kickoff = parisDateToUtc(
+        currentDate.year,
+        currentDate.month,
+        currentDate.day,
+        t.hours,
+        t.minutes
+      );
+      if (kickoff <= now) continue;
+      if (!firstMatchDate || kickoff < firstMatchDate) firstMatchDate = kickoff;
     }
 
-    if (!currentDate || !firstTime) return null;
-
-    const firstMatchDate = new Date(
-      currentDate.getFullYear(),
-      currentDate.getMonth(),
-      currentDate.getDate(),
-      firstTime.hours,
-      firstTime.minutes,
-      0,
-      0
-    );
-
-    return firstMatchDate > now ? { firstMatchDate } : null;
+    return firstMatchDate ? { firstMatchDate } : null;
   } catch {
     return null;
   }
