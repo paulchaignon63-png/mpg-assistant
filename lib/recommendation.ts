@@ -4,12 +4,8 @@
  */
 
 import type { MpgPlayer } from "@/types/mpg";
-import {
-  isPlayerInInjuryList,
-  isPlayerInjuryMatchWithContext,
-  type InjuryItemWithContext,
-} from "./injuries-service";
 import { getRotationPairKey, normalizeForRotation } from "./rotation-service";
+import { hasReturnedBy } from "./return-date";
 import { getOpponentRankForClubAndRound } from "./match-opponent-rank-service";
 import { getTeamFormMultiplier } from "./team-form-service";
 
@@ -46,6 +42,25 @@ const FORMATIONS: Record<number, Formation> = {
 export const AVAILABLE_FORMATIONS = [
   343, 352, 424, 433, 442, 451, 532, 541,
 ] as const;
+
+/**
+ * Le score reste exprimé sur 10, comme les notes MPG. La formule pouvant
+ * dépasser 17, un simple `Math.min(10, …)` écrasait sur 10.00 tous les bons
+ * joueurs — un attaquant à 7 buts et un à 18 buts finissaient à égalité, et le
+ * tri comme le capitaine suggéré devenaient arbitraires. On garde donc la
+ * partie basse de l'échelle telle quelle et on comprime au-dessus du seuil,
+ * de façon strictement croissante : 10 n'est jamais atteint, mais l'ordre est
+ * préservé.
+ */
+const SCORE_SOFT_CAP = 8;
+const SCORE_COMPRESSION = 6;
+
+function toTenScale(raw: number): number {
+  if (raw <= 0) return 0;
+  if (raw <= SCORE_SOFT_CAP) return raw;
+  const excess = raw - SCORE_SOFT_CAP;
+  return SCORE_SOFT_CAP + (10 - SCORE_SOFT_CAP) * (1 - Math.exp(-excess / SCORE_COMPRESSION));
+}
 
 /** Seuil minimum de score pour préférer un remplaçant (sinon affiché avec warning) */
 export const MIN_SUBSTITUTE_SCORE = 4;
@@ -89,21 +104,6 @@ export function formatFormation(code: number): string {
   return `${str[0]}-${str[1]}-${str[2]}`;
 }
 
-const POSITION_COEFF: Record<Position, number> = {
-  G: 1.0,
-  D: 1.025,
-  M: 1.05,
-  A: 1.2,
-};
-
-/** Coefficients pour la performance offensive (buts + passes) */
-const OFFENSIVE_COEFF: Record<Position, number> = {
-  G: 0.7,
-  D: 0.85,
-  M: 0.95,
-  A: 1.3,
-};
-
 /** Seuils pour le mode "star de retour" (données insuffisantes) */
 const INSUFFICIENT_DATA_THRESHOLDS = {
   minMatchs: 6,
@@ -111,7 +111,6 @@ const INSUFFICIENT_DATA_THRESHOLDS = {
   attackerBonusQuotation: 35,
   pctTitularisationsThreshold: 0.8,
   pctTitMinQuotation: 15,
-  doubtfulMultStar: 0.7,
 };
 
 function hasInsufficientData(player: PoolPlayer): boolean {
@@ -130,15 +129,6 @@ function hasInsufficientData(player: PoolPlayer): boolean {
     return true;
 
   return false;
-}
-
-function normalizePlayerName(name: string): string {
-  return name
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function getPositionFromMpg(position?: string): Position {
@@ -170,8 +160,11 @@ export interface PoolPlayer {
   pctTitularisations?: number;
   yellowCards?: number;
   redCards?: number;
+  /** Statuts résolus en amont contre l'effectif (cf. lib/status-aggregation). */
   isSuspended?: boolean;
   isInjured?: boolean;
+  isDoubtful?: boolean;
+  isAbsenceExplained?: boolean;
   /** Notes des 5 derniers matchs (MPGStats) */
   last5Notes?: number[];
   /** Minutes jouées par match (5 derniers) */
@@ -370,7 +363,16 @@ function getDisponibiliteFine(
   return 1.0;
 }
 
-/** fatigueMult: 0→1.0, 1→0.98, 2→0.95, 3→0.90, 4→0.85, 5+→0.75. Bug 2.1 : inclut matchs autres compétitions. */
+/**
+ * fatigueMult: 0→1.0, 1→0.98, 2→0.95, 3→0.90, 4→0.85, 5+→0.75.
+ *
+ * `matchsLast15Days` doit être un vrai décompte sur 15 jours (calculé à partir
+ * des dates de match). Il était auparavant approximé par « nombre de matchs
+ * joués parmi les 5 derniers », qui couvre environ cinq semaines : tout
+ * titulaire régulier tombait donc à 5 et perdait 25 %, alors qu'un joueur
+ * n'ayant joué aucun match n'était pas pénalisé. Sans dates disponibles, la
+ * valeur est absente et seules les autres compétitions comptent.
+ */
 function getFatigueMult(matchsLast15Days: number, matchsLast7DaysOtherComps: number = 0): number {
   const total = matchsLast15Days + matchsLast7DaysOtherComps;
   const t: Record<number, number> = { 0: 1.0, 1: 0.98, 2: 0.95, 3: 0.9, 4: 0.85 };
@@ -440,13 +442,8 @@ export function computePlayerScore(
   player: EnrichedPlayer & PoolPlayer,
   options: {
     championshipDays?: number;
-    injuredNames?: string[];
-    injuredDoubtfulNames?: string[];
-    injuredItems?: InjuryItemWithContext[];
-    injuredDoubtfulItems?: InjuryItemWithContext[];
     opponentRank?: number;
     totalTeams?: number;
-    absenceExplainedPlayerNames?: Set<string>;
     nextMatchDate?: Date;
     roundOpponentRankMap?: Map<number, Map<string, number>>;
     newsFormSignals?: { negative?: boolean };
@@ -454,39 +451,30 @@ export function computePlayerScore(
 ): number {
   const {
     championshipDays = 15,
-    injuredNames = [],
-    injuredDoubtfulNames = [],
-    injuredItems = [],
-    injuredDoubtfulItems = [],
     opponentRank,
     totalTeams = 18,
-    absenceExplainedPlayerNames,
     nextMatchDate,
     roundOpponentRankMap,
     newsFormSignals,
   } = options;
 
-  const pName = player.name ?? "";
-  const pClub = player.clubName;
+  // NIVEAU 1 : blessé ou suspendu → score = 0.
+  //
+  // Les statuts sont résolus en amont contre l'effectif (lib/status-aggregation),
+  // plus par rapprochement de noms ici : la liste à plat sans club court-circuitait
+  // le contrôle par club et suffisait à sortir un homonyme du 11.
+  //
+  // Une absence est levée si la date de retour lue précède le coup d'envoi.
+  // Sans date exploitable, hasReturnedBy renvoie false et le joueur reste écarté.
+  if (player.isInjured === true && !hasReturnedBy(player.injuryReturnDate, nextMatchDate)) {
+    return 0;
+  }
+  if (player.isSuspended === true && !hasReturnedBy(player.suspensionReturnDate, nextMatchDate)) {
+    return 0;
+  }
 
-  // NIVEAU 1 : blessé ou suspendu → score = 0 (avant tout autre calcul)
-  const isInjured =
-    player.isInjured === true ||
-    (injuredItems.length > 0 && isPlayerInjuryMatchWithContext(pName, pClub, injuredItems)) ||
-    (injuredNames.length > 0 && isPlayerInInjuryList(pName, injuredNames));
-  if (isInjured) return 0;
-
-  const isSuspended = player.isSuspended === true;
-  if (isSuspended) return 0;
-
-  const isDoubtful =
-    (injuredDoubtfulItems.length > 0 && isPlayerInjuryMatchWithContext(pName, pClub, injuredDoubtfulItems)) ||
-    (injuredDoubtfulNames.length > 0 && isPlayerInInjuryList(pName, injuredDoubtfulNames));
-
-  const isAbsenceExplained =
-    absenceExplainedPlayerNames?.has(normalizePlayerName(pName)) ||
-    (injuredDoubtfulItems.length > 0 && isPlayerInjuryMatchWithContext(pName, pClub, injuredDoubtfulItems)) ||
-    (injuredDoubtfulNames.length > 0 && isPlayerInInjuryList(pName, injuredDoubtfulNames));
+  const isDoubtful = player.isDoubtful === true;
+  const isAbsenceExplained = player.isAbsenceExplained === true || isDoubtful;
 
   const useStarMode = hasInsufficientData(player as PoolPlayer) && isAbsenceExplained;
 
@@ -612,7 +600,7 @@ export function computePlayerScore(
   }
 
   const homeAwayMult = player.isHome === true ? 1.08 : player.isHome === false ? 0.92 : 1;
-  const matchsLast15 = player.matchsLast15Days ?? player.last5Minutes?.filter((m) => (m ?? 0) > 0).length ?? 0;
+  const matchsLast15 = player.matchsLast15Days ?? 0;
   const matchsLast7Other = player.matchsLast7DaysOtherComps ?? 0;
   const fatigueMult = getFatigueMult(matchsLast15, matchsLast7Other);
   const teamFormWins = player.teamFormWinsLast5 ?? 2;
@@ -638,18 +626,13 @@ export function computePlayerScore(
     score *= m / MIN_MATCHES_FOR_STARTER;
   }
 
-  return Math.round(Math.max(0, Math.min(10, score)) * 100) / 100;
+  return Math.round(toTenScale(Math.max(0, score)) * 100) / 100;
 }
 
 export interface ScoreOptions {
   championshipDays?: number;
-  injuredNames?: string[];
-  injuredDoubtful?: string[];
-  injuredItems?: InjuryItemWithContext[];
-  injuredDoubtfulItems?: InjuryItemWithContext[];
   opponentRank?: number;
   totalTeams?: number;
-  absenceExplainedPlayerNames?: Set<string>;
   nextMatchDate?: Date;
   roundOpponentRankMap?: Map<number, Map<string, number>>;
   newsFormSignals?: { negative?: boolean };
@@ -663,44 +646,21 @@ export interface ScoreOptions {
 export function selectBest11(
   players: EnrichedPlayer[],
   formation: number = 343,
-  injuredNames: string[] = [],
   scoreOptions: ScoreOptions = {}
 ): EnrichedPlayer[] {
   const form = FORMATIONS[formation] ?? FORMATIONS[343];
   const byPos = { G: [] as EnrichedPlayer[], D: [] as EnrichedPlayer[], M: [] as EnrichedPlayer[], A: [] as EnrichedPlayer[] };
-  const inj = [...injuredNames, ...(scoreOptions.injuredNames ?? [])];
-  const doubt = scoreOptions.injuredDoubtful ?? [];
-  const injItems = scoreOptions.injuredItems ?? [];
-  const doubtItems = scoreOptions.injuredDoubtfulItems ?? [];
 
   for (const p of players) {
     const score = computePlayerScore(p, {
-      injuredNames: inj,
-      injuredDoubtfulNames: doubt,
-      injuredItems: injItems,
-      injuredDoubtfulItems: doubtItems,
       championshipDays: scoreOptions.championshipDays,
       opponentRank: scoreOptions.opponentRank,
       totalTeams: scoreOptions.totalTeams,
-      absenceExplainedPlayerNames: scoreOptions.absenceExplainedPlayerNames,
       nextMatchDate: scoreOptions.nextMatchDate,
       roundOpponentRankMap: scoreOptions.roundOpponentRankMap,
       newsFormSignals: scoreOptions.newsFormSignals,
     });
     (p as EnrichedPlayer).recommendationScore = score;
-    // Assertion Bug 1.1/1.2 : un joueur blessé ou suspendu doit avoir score 0
-    const isInjuredPlayer =
-      p.isInjured === true ||
-      (injItems.length > 0 && isPlayerInjuryMatchWithContext(p.name ?? "", p.clubName, injItems)) ||
-      (inj.length > 0 && isPlayerInInjuryList(p.name ?? "", inj));
-    const isSuspendedPlayer = (p as { isSuspended?: boolean }).isSuspended === true;
-    if (score > 0 && (isInjuredPlayer || isSuspendedPlayer) && process.env.NODE_ENV === "development") {
-      console.error(
-        "[recommendation] ERREUR score>0 pour joueur indisponible:",
-        p.name,
-        { score, isInjured: isInjuredPlayer, isSuspended: isSuspendedPlayer }
-      );
-    }
     if (score > 0 && p.position) {
       byPos[p.position].push(p as EnrichedPlayer);
     }
@@ -736,12 +696,11 @@ export function selectBest11(
 export function getRecommendedTeam(
   squad: Record<string, unknown> | undefined,
   formation: number = 343,
-  injuredNames: string[] = [],
   poolPlayers: PoolPlayer[] = [],
   scoreOptions: ScoreOptions = {}
 ): EnrichedPlayer[] {
   const players = extractPlayersFromSquad(squad, poolPlayers);
-  return selectBest11(players, formation, injuredNames, scoreOptions);
+  return selectBest11(players, formation, scoreOptions);
 }
 
 /** Joueur non sélectionné (ni titulaire ni remplaçant) — "lofteur" */
@@ -759,12 +718,11 @@ export interface LofteurPlayer {
 export function getRecommendedTeamWithSubstitutes(
   squad: Record<string, unknown> | undefined,
   formation: number = 343,
-  injuredNames: string[] = [],
   poolPlayers: PoolPlayer[] = [],
   scoreOptions: ScoreOptions = {}
 ): { recommended: EnrichedPlayer[]; substitutes: Record<Position, SubstitutePlayer[]>; lofteurs: LofteurPlayer[] } {
   const players = extractPlayersFromSquad(squad, poolPlayers);
-  const recommended = selectBest11(players, formation, injuredNames, scoreOptions);
+  const recommended = selectBest11(players, formation, scoreOptions);
   const substitutes = getRecommendedSubstitutes(players, recommended, formation);
   const key = (p: { id?: string; name?: string; position?: string }) =>
     p.id ?? `${p.name ?? ""}_${p.position ?? ""}`;

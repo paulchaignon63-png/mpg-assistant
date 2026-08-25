@@ -11,6 +11,7 @@
 import * as cheerio from "cheerio";
 import type { ScrapedInjury, ScrapedTransfer, ScrapedSuspension } from "@/types/scraped";
 import { fetchHtml } from "../base-scraper";
+import { parseReturnDate } from "../../return-date";
 import { getLeagueConfig } from "@/lib/league-config";
 
 /** Mapping code TM → slug URL (transfermarkt.com) */
@@ -32,6 +33,16 @@ function parsePosition(txt: string): string | undefined {
   if (t.includes("midfield") || t.includes("midfield") || t.includes("milieu") || t.includes("mittelfeld")) return "M";
   if (t.includes("forward") || t.includes("winger") || t.includes("attaquant") || t.includes("stürmer")) return "A";
   return undefined;
+}
+
+/**
+ * Normalise une date de retour en ISO (AAAA-MM-JJ).
+ * Le texte brut de la cellule était stocké tel quel et donnait `Invalid Date`
+ * en aval — donc aucun effet, en silence.
+ */
+function toIsoDate(raw: string | undefined): string | undefined {
+  const parsed = parseReturnDate(raw);
+  return parsed ? parsed.toISOString().slice(0, 10) : undefined;
 }
 
 function extractPlayerId(href: string | undefined): string | undefined {
@@ -125,7 +136,7 @@ export async function scrapeTransfermarktInjuries(options?: {
         playerId,
         clubName: clubName || undefined,
         reason: reason || undefined,
-        returnDate: returnDate && returnDate.length < 20 ? returnDate : undefined,
+        returnDate: toIsoDate(returnDate),
         injurySince: injurySince && injurySince.length < 20 ? injurySince : undefined,
         status: isDoubtful ? "doubtful" : "out",
         position: position || undefined,
@@ -257,7 +268,7 @@ export async function scrapeTransfermarktSuspensions(options?: {
       $tr.find("td").each((_, td) => {
         const text = $(td).text().trim();
         const dateMatch = text.match(/\d{2}[\/.]\d{2}[\/.]\d{2,4}/);
-        if (dateMatch) returnDate = text;
+        if (dateMatch) returnDate = dateMatch[0];
         if (
           text.length > 3 &&
           text.length < 80 &&
@@ -283,7 +294,7 @@ export async function scrapeTransfermarktSuspensions(options?: {
         playerId,
         clubName: clubName || undefined,
         reason: reason || undefined,
-        returnDate: returnDate && returnDate.length < 20 ? returnDate : undefined,
+        returnDate: toIsoDate(returnDate),
       });
     }
 

@@ -22,6 +22,11 @@ function normalizeName(name: string): string {
 /**
  * Récupère les stats joueurs depuis Sofascore (ratings, titularisations, cartons, assists)
  * + Transfermarkt (suspensions) en fallback de MPGStats.
+ *
+ * Note : `isSuspended` n'est posé que sur les joueurs présents dans les stats
+ * Sofascore. Ce n'est pas une perte d'information — la route scrape les
+ * suspensions Transfermarkt par son propre chemin et les résout contre
+ * l'effectif (cf. app/api/mpg/recommendations/route.ts).
  */
 export async function getFallbackPlayerStats(
   championshipId: number | string
@@ -29,7 +34,7 @@ export async function getFallbackPlayerStats(
   const result = new Map<string, MpgStatsEnrichment>();
 
   let sofascoreMap: Awaited<ReturnType<typeof getSofascorePlayerStats>> = new Map();
-  let suspendedNames = new Set<string>();
+  const suspendedNames = new Set<string>();
 
   try {
     sofascoreMap = await getSofascorePlayerStats(championshipId);

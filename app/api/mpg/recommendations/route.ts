@@ -9,14 +9,14 @@ import {
   getOpponentRankForClub,
   type OpponentRankData,
 } from "@/lib/opponent-rank-service";
-import { isPlayerInInjuryList, isPlayerInjuryMatchWithContext, type InjuryItemWithContext } from "@/lib/injuries-service";
+import { type InjuryItemWithContext } from "@/lib/injuries-service";
 import { fetchSofascoreStandingsAndFixtures, getNextMatchdayFirstMatch, getMatchCountLast7DaysOtherCompetitions } from "@/lib/sofascore-client";
 import { getRecommendedTeamWithSubstitutes, getSuggestedCaptain, type PoolPlayer } from "@/lib/recommendation";
 import { getTeamFormForClubs } from "@/lib/team-form-service";
-import { getRoundToOpponentRankMap } from "@/lib/match-opponent-rank-service";
+import { getRoundToOpponentRankMap, countMatchesInWindow } from "@/lib/match-opponent-rank-service";
 import { getTransferredRecentlyPlayerNames } from "@/lib/transfer-recency-service";
 import { getCoTitularisationLowPairs } from "@/lib/rotation-service";
-import { resolveInjuriesWithPriority } from "@/lib/status-aggregation";
+import { resolvePlayerStatuses, type StatusEntryWithReturn } from "@/lib/status-aggregation";
 import { getStatusSourcesConfig } from "@/lib/status-sources-config";
 import { aggregateScrapedData } from "@/lib/scrapers";
 
@@ -63,30 +63,17 @@ function normalizeName(name: string): string {
 interface EnrichPoolOptions {
   statsMap: Map<string, MpgStatsEnrichment>;
   sofascoreMap?: Map<string, { pctTitularisations?: number; yellowCards?: number; redCards?: number; assists?: number; xG?: number; tackles?: number; interceptions?: number; cleanSheets?: number }>;
-  suspendedNames?: Set<string>;
-  /** Liste des noms blessés (score 0) - pour marquer isInjured sur chaque joueur du pool */
-  injuredFull?: string[];
-  injuredItems?: InjuryItemWithContext[];
   opponentRankMap?: Map<string, number>;
   isHomeByClub?: Map<string, boolean>;
   teamStatsByClub?: Map<string, { goalsFor: number; goalsAgainst: number }>;
   clubByRank?: Map<number, string>;
   teamFormMap?: Map<string, { winsLast5: number; drawsLast5?: number; lossesLast5?: number }>;
   transferredRecentlySet?: Set<string>;
-  injuryReturnByPlayer?: Map<string, string>;
-  suspensionReturnByPlayer?: Map<string, string>;
   marketValueByPlayer?: Map<string, string>;
+  /** Dates des matchs de championnat, pour la fenêtre de fatigue réelle. */
+  matchDateByClub?: Map<string, Map<number, number>>;
   /** Bug 2.1 : matchs en 7j hors championnat (LDC, Coupe) par clé joueur normalisée */
   matchsLast7DaysOtherCompsMap?: Map<string, number>;
-}
-
-/** Vérifie si un joueur (clé normalisée) est considéré suspendu (match exact ou partiel) */
-function isInSuspendedSet(playerKey: string, suspendedNames: Set<string>): boolean {
-  if (suspendedNames.has(playerKey)) return true;
-  for (const s of suspendedNames) {
-    if (s.includes(playerKey) || playerKey.includes(s)) return true;
-  }
-  return false;
 }
 
 function enrichPoolWithStats(
@@ -96,19 +83,15 @@ function enrichPoolWithStats(
   const {
     statsMap,
     sofascoreMap,
-    suspendedNames,
-    injuredFull,
-    injuredItems,
     opponentRankMap,
     isHomeByClub,
     teamStatsByClub,
     clubByRank,
     teamFormMap,
     transferredRecentlySet,
-    injuryReturnByPlayer,
-    suspensionReturnByPlayer,
     marketValueByPlayer,
     matchsLast7DaysOtherCompsMap,
+    matchDateByClub,
   } = options;
 
   const normClub = (s: string) =>
@@ -139,14 +122,11 @@ function enrichPoolWithStats(
           ...(stats.last5Notes != null && { last5Notes: stats.last5Notes }),
           ...(stats.last5Minutes != null && { last5Minutes: stats.last5Minutes }),
           ...(stats.last5OpponentRounds != null && { last5OpponentRounds: stats.last5OpponentRounds }),
-          ...(stats.last5Minutes != null && {
-            matchsLast15Days: stats.last5Minutes.filter((m) => (m ?? 0) > 0).length,
-          }),
           assists: stats.assists ?? sofascore?.assists ?? p.assists,
           pctTitularisations: stats.pctTitularisations ?? sofascore?.pctTitularisations ?? p.pctTitularisations,
           yellowCards: stats.yellowCards ?? sofascore?.yellowCards ?? p.yellowCards,
           redCards: stats.redCards ?? sofascore?.redCards ?? p.redCards,
-          isSuspended: stats.isSuspended ?? (suspendedNames && isInSuspendedSet(key, suspendedNames) ? true : undefined) ?? p.isSuspended,
+          isSuspended: stats.isSuspended ?? p.isSuspended,
           xG: sofascore?.xG ?? (p as { xG?: number }).xG,
           tackles: sofascore?.tackles ?? (p as { tackles?: number }).tackles,
           interceptions: sofascore?.interceptions ?? (p as { interceptions?: number }).interceptions,
@@ -162,7 +142,6 @@ function enrichPoolWithStats(
           ...(sofascore?.tackles != null && { tackles: sofascore.tackles }),
           ...(sofascore?.interceptions != null && { interceptions: sofascore.interceptions }),
           ...(sofascore?.cleanSheets != null && { cleanSheets: sofascore.cleanSheets }),
-          ...(suspendedNames && isInSuspendedSet(key, suspendedNames) && { isSuspended: true }),
         };
 
     if (opponentRankMap?.size && p.clubName) {
@@ -200,17 +179,20 @@ function enrichPoolWithStats(
       }
     }
     if (transferredRecentlySet?.has(key)) (updated as { transferredRecently?: boolean }).transferredRecently = true;
-    if (injuryReturnByPlayer?.has(key)) (updated as { injuryReturnDate?: string }).injuryReturnDate = injuryReturnByPlayer.get(key);
-    if (suspensionReturnByPlayer?.has(key)) (updated as { suspensionReturnDate?: string }).suspensionReturnDate = suspensionReturnByPlayer.get(key);
     if (marketValueByPlayer?.has(key)) (updated as { marketValue?: string }).marketValue = marketValueByPlayer.get(key);
 
     if (matchsLast7DaysOtherCompsMap?.has(key)) (updated as { matchsLast7DaysOtherComps?: number }).matchsLast7DaysOtherComps = matchsLast7DaysOtherCompsMap.get(key);
 
-    // Bug 1.1 : marquer isInjured sur le joueur si présent dans les listes blessures (garantit score = 0)
-    const inInjuredList =
-      (injuredFull?.length && isPlayerInInjuryList(name, injuredFull)) ||
-      (injuredItems?.length && isPlayerInjuryMatchWithContext(name, p.clubName, injuredItems));
-    if (inInjuredList) (updated as { isInjured?: boolean }).isInjured = true;
+    // Fatigue : matchs de championnat réellement joués sur les 15 derniers jours.
+    if (matchDateByClub?.size) {
+      const played = countMatchesInWindow(
+        matchDateByClub,
+        p.clubName,
+        (updated as { last5OpponentRounds?: number[] }).last5OpponentRounds,
+        15
+      );
+      if (played != null) (updated as { matchsLast15Days?: number }).matchsLast15Days = played;
+    }
 
     return updated;
   });
@@ -266,7 +248,6 @@ export async function POST(request: NextRequest) {
     const willCallApiFootball = !!(effectiveChampId && apiKey?.trim() && enableApiFootball);
 
     if (process.env.NODE_ENV === "development") {
-      // eslint-disable-next-line no-console
       console.log("[Le 11 parfait] championshipId:", championshipId, "→ effectiveChampId:", effectiveChampId, "| apiKey:", apiKey ? "OK" : "MANQUANTE");
     }
 
@@ -281,7 +262,7 @@ export async function POST(request: NextRequest) {
       sofascoreSuspendedFromLastRound,
       injuries,
       opponentData,
-      roundOpponentRankMap,
+      roundContext,
       scrapedData,
       nextMatchDate,
       matchsLast7DaysOtherCompsMap,
@@ -309,8 +290,14 @@ export async function POST(request: NextRequest) {
         ? fetchOpponentData(effectiveChampId, apiKey, willCallApiFootball)
         : { rankByClub: new Map(), totalTeams: 18 },
       effectiveChampId
-        ? getRoundToOpponentRankMap(effectiveChampId).catch(() => new Map())
-        : Promise.resolve(new Map()),
+        ? getRoundToOpponentRankMap(effectiveChampId).catch(() => ({
+            rankByRound: new Map<number, Map<string, number>>(),
+            matchDateByClub: new Map<string, Map<number, number>>(),
+          }))
+        : Promise.resolve({
+            rankByRound: new Map<number, Map<string, number>>(),
+            matchDateByClub: new Map<string, Map<number, number>>(),
+          }),
       effectiveChampId
         ? aggregateScrapedData({ championshipId: effectiveChampId, transfermarkt: true }).catch(() => ({
             injuries: [],
@@ -329,9 +316,7 @@ export async function POST(request: NextRequest) {
         : Promise.resolve(new Map<string, number>()),
     ]);
 
-    const coachFormation = coach as { matchTeamFormation?: { composition?: number } } | null;
-    // Utiliser la formation demandée par l'utilisateur (dropdown), pas celle du coach MPG.
-    // Le coach MPG sert uniquement de fallback si formation non fournie (chargement initial).
+    // Formation demandée par l'utilisateur (dropdown), pas celle du coach MPG.
     const form = formation;
 
 
@@ -343,71 +328,67 @@ export async function POST(request: NextRequest) {
         .replace(/\s+/g, " ")
         .trim();
 
-    const suspendedNames = new Set<string>();
-    const suspensionReturnByPlayer = new Map<string, string>();
+    // Entrées de suspension : on conserve le club quand la source le donne,
+    // il sert à départager les homonymes lors du rapprochement.
+    const suspendedEntries: StatusEntryWithReturn[] = [];
     for (const s of suspensionsFull) {
-      const k = normForMatch(s.playerName);
-      suspendedNames.add(k);
-      if (s.returnDate) suspensionReturnByPlayer.set(k, s.returnDate);
+      suspendedEntries.push({
+        playerName: s.playerName,
+        clubName: s.clubName,
+        returnDate: s.returnDate,
+      });
     }
     // Filet de sécurité : suspendus depuis les news (RSS, L'Equipe, etc.)
     for (const n of scrapedData.news ?? []) {
       if (n.type === "suspension" && n.playerNames?.length) {
+        const clubContext = n.clubNames?.length ? n.clubNames[0] : undefined;
         for (const name of n.playerNames) {
-          suspendedNames.add(normForMatch(name));
+          suspendedEntries.push({ playerName: name, clubName: clubContext });
         }
       }
     }
     // Filet de sécurité : cartons rouges dernière journée (SofaScore)
     for (const name of sofascoreSuspendedFromLastRound) {
-      suspendedNames.add(name);
+      suspendedEntries.push({ playerName: name });
     }
 
     // Statuts blessés/douteux : utilisation directe des sources (SofaScore, MPG, RSS) via fetchEnrichedInjuries.
     // Plus de réconciliation sur "a joué les 2 dernières journées" (critère supprimé).
     // Agrégation avec hiérarchie configurable (STATUS_SOURCE_PRIORITY, TRUST_MPG_APTE_WHEN_CONFLICT).
     const statusConfig = getStatusSourcesConfig();
-    const mpgApteSet = new Set<string>();
-    // Annonces "dans le groupe" / "de retour" : retirer ces joueurs des listes blessés/douteux (toujours appliqué)
-    const inSquadOrReturnSet = new Set<string>();
+
+    // Annonces "dans le groupe" / "de retour" : lèvent l'absence.
+    const apteEntries: StatusEntryWithReturn[] = [];
     for (const n of scrapedData.news ?? []) {
       if ((n.type === "in_squad" || n.type === "return") && n.playerNames?.length) {
+        const clubContext = n.clubNames?.length ? n.clubNames[0] : undefined;
         for (const name of n.playerNames) {
-          inSquadOrReturnSet.add(normForMatch(name));
+          apteEntries.push({ playerName: name, clubName: clubContext });
         }
       }
     }
-    // Dispo sur MPG (vert) : même logique, on retire des blessés
+    // Dispo sur MPG (pastille verte)
+    const mpgAvailableEntries: StatusEntryWithReturn[] = [];
     for (const p of pool?.poolPlayers ?? (pool as { players?: PoolPlayer[] })?.players ?? []) {
-      const isDispo = (p as { available?: boolean }).available === true;
-      if (isDispo) {
-        const name = p.name ?? [p.lastName, p.firstName].filter(Boolean).join(" ").trim();
-        if (name) inSquadOrReturnSet.add(normForMatch(name));
-      }
+      if ((p as { available?: boolean }).available !== true) continue;
+      const name = p.name ?? [p.lastName, p.firstName].filter(Boolean).join(" ").trim();
+      if (name) mpgAvailableEntries.push({ playerName: name, clubName: p.clubName });
     }
-    const resolved = resolveInjuriesWithPriority(
-      injuries.injured ?? [],
-      injuries.doubtful ?? [],
-      injuries.injuredItems,
-      injuries.doubtfulItems,
-      mpgApteSet,
-      statusConfig,
-      inSquadOrReturnSet
-    );
-    const injuriesResolved = {
-      ...resolved,
-      absenceExplainedPlayerNames: injuries.absenceExplainedPlayerNames,
-    };
 
-    const injuryReturnByPlayer = new Map<string, string>();
-    for (const it of injuries.injuredItems ?? []) {
-      if (it.returnDate) injuryReturnByPlayer.set(normForMatch(it.playerName), it.returnDate);
-    }
-    for (const it of injuries.doubtfulItems ?? []) {
-      if (it.returnDate && !injuryReturnByPlayer.has(normForMatch(it.playerName))) {
-        injuryReturnByPlayer.set(normForMatch(it.playerName), it.returnDate);
-      }
-    }
+    const toEntries = (
+      items: InjuryItemWithContext[] | undefined,
+      names: string[] | undefined
+    ): StatusEntryWithReturn[] =>
+      items?.length
+        ? items.map((it) => ({
+            playerName: it.playerName,
+            clubName: it.clubName,
+            returnDate: it.returnDate,
+          }))
+        : (names ?? []).map((playerName) => ({ playerName }));
+
+    const injuredEntries = toEntries(injuries.injuredItems, injuries.injured);
+    const doubtfulEntries = toEntries(injuries.doubtfulItems, injuries.doubtful);
 
     const marketValueByPlayer = new Map<string, string>();
     for (const it of scrapedData.injuries ?? []) {
@@ -438,19 +419,45 @@ export async function POST(request: NextRequest) {
     poolPlayers = enrichPoolWithStats(poolPlayers, {
       statsMap,
       sofascoreMap,
-      suspendedNames,
-      injuredFull: injuriesResolved.injured,
-      injuredItems: injuriesResolved.injuredItems,
       opponentRankMap: opponentData.rankByClub,
       isHomeByClub: (opponentData as OpponentRankData).isHomeByClub,
       teamStatsByClub: (opponentData as OpponentRankData).teamStatsByClub,
       clubByRank: (opponentData as OpponentRankData).clubByRank,
       teamFormMap,
       transferredRecentlySet,
-      injuryReturnByPlayer,
-      suspensionReturnByPlayer,
       marketValueByPlayer,
       matchsLast7DaysOtherCompsMap,
+      matchDateByClub: roundContext.matchDateByClub,
+    });
+
+    // Statuts : rapprochés une seule fois contre l'effectif enrichi, puis posés
+    // en drapeaux sur les joueurs. Plus aucun rapprochement de noms en aval.
+    const statuses = resolvePlayerStatuses(
+      poolPlayers,
+      {
+        injured: injuredEntries,
+        doubtful: doubtfulEntries,
+        suspended: suspendedEntries,
+        apte: apteEntries,
+        mpgAvailable: mpgAvailableEntries,
+      },
+      statusConfig
+    );
+    const absenceExplainedSet = injuries.absenceExplainedPlayerNames ?? new Set<string>();
+    poolPlayers = poolPlayers.map((p, index) => {
+      const injured = statuses.injuredByIndex.get(index);
+      const doubtful = statuses.doubtfulByIndex.get(index);
+      const suspended = statuses.suspendedByIndex.get(index);
+      const name = p.name ?? [p.lastName, p.firstName].filter(Boolean).join(" ").trim();
+      return {
+        ...p,
+        isInjured: injured != null ? true : undefined,
+        isDoubtful: doubtful != null ? true : undefined,
+        isSuspended: suspended != null ? true : p.isSuspended,
+        isAbsenceExplained: name && absenceExplainedSet.has(normForMatch(name)) ? true : undefined,
+        injuryReturnDate: injured?.returnDate ?? doubtful?.returnDate ?? p.injuryReturnDate,
+        suspensionReturnDate: suspended?.returnDate ?? p.suspensionReturnDate,
+      };
     });
 
     let rotationLowPairs = new Set<string>();
@@ -466,11 +473,13 @@ export async function POST(request: NextRequest) {
     }
 
     if (process.env.NODE_ENV === "development") {
-      console.log("[Bug 1.1/1.2] Blessés détectés:", injuriesResolved.injured.length, injuriesResolved.injured);
-      console.log("[Bug 1.1/1.2] Suspendus détectés:", Array.from(suspendedNames));
+      const named = (m: Map<number, unknown>) =>
+        Array.from(m.keys()).map((i) => poolPlayers[i]?.name ?? `#${i}`);
+      console.log("[Statuts] Blessés:", named(statuses.injuredByIndex));
+      console.log("[Statuts] Incertains:", named(statuses.doubtfulByIndex));
+      console.log("[Statuts] Suspendus:", named(statuses.suspendedByIndex));
     }
 
-    const playersWithAdvRank = poolPlayers.filter((p) => p.nextOpponentRank != null).length;
 
     const championshipDays =
       (division as { liveState?: { currentGameWeek?: number } } | null)?.liveState?.currentGameWeek ?? 15;
@@ -478,19 +487,15 @@ export async function POST(request: NextRequest) {
     const { recommended, substitutes, lofteurs } = getRecommendedTeamWithSubstitutes(
       squad,
       form,
-      injuriesResolved.injured,
       poolPlayers,
       {
         championshipDays,
-        injuredDoubtful: injuriesResolved.doubtful,
-        injuredItems: injuriesResolved.injuredItems,
-        injuredDoubtfulItems: injuriesResolved.doubtfulItems,
         totalTeams: opponentData.totalTeams,
-        absenceExplainedPlayerNames: injuriesResolved.absenceExplainedPlayerNames,
         nextMatchDate: nextMatchDate?.firstMatchTimestamp
           ? new Date(nextMatchDate.firstMatchTimestamp * 1000)
           : undefined,
-        roundOpponentRankMap: roundOpponentRankMap.size > 0 ? roundOpponentRankMap : undefined,
+        roundOpponentRankMap:
+          roundContext.rankByRound.size > 0 ? roundContext.rankByRound : undefined,
         rotationLowPairs,
       }
     );

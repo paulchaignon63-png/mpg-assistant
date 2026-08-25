@@ -1,109 +1,72 @@
 /**
- * Agrégation des statuts blessés/incertains avec hiérarchie des sources (RSS, SofaScore, MPG).
- * Croise les sources et applique la config (priorité, confiance MPG pour "apte").
+ * Résolution des statuts (blessé, incertain, suspendu) contre l'effectif réel.
+ *
+ * Les sources fournissent des noms libres ; on les rapproche des joueurs du
+ * pool via lib/player-matching, qui refuse les rapprochements ambigus. Le
+ * résultat est indexé par joueur, ce qui supprime tout rapprochement de noms
+ * en aval : le calcul de score ne lit plus que des drapeaux booléens.
  */
 
-import type { InjuryItemWithContext } from "./injuries-service";
+import {
+  resolveEntriesToPlayers,
+  type PlayerRef,
+  type StatusEntry,
+} from "./player-matching";
 import { getStatusSourcesConfig } from "./status-sources-config";
 
-function normalize(s: string): string {
-  return s
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .replace(/\s+/g, " ")
-    .trim();
+export interface StatusEntryWithReturn extends StatusEntry {
+  returnDate?: string;
+  reason?: string;
 }
 
-/** Retourne true si le nom (ex. "Dembélé Ousmane") matche au moins une entrée du set (ex. "ousmane dembele") par tokens. */
-function isApteMatch(playerName: string, apteSet: Set<string>): boolean {
-  if (!playerName?.trim() || apteSet.size === 0) return false;
-  const n = normalize(playerName);
-  if (apteSet.has(n)) return true;
-  const tokens = n.split(" ").filter(Boolean);
-  for (const entry of apteSet) {
-    if (n.includes(entry) || entry.includes(n)) return true;
-    const entryTokens = entry.split(" ").filter(Boolean);
-    const common = tokens.filter((t) => entryTokens.includes(t));
-    if (common.length >= 2) return true;
-  }
-  return false;
+export interface StatusInput {
+  injured: StatusEntryWithReturn[];
+  doubtful: StatusEntryWithReturn[];
+  suspended: StatusEntryWithReturn[];
+  /** Annonces « dans le groupe » / « de retour » : lèvent une absence. */
+  apte: StatusEntry[];
+  /** Joueurs que MPG signale disponibles (pastille verte). */
+  mpgAvailable: StatusEntry[];
 }
 
-export interface ResolvedInjuries {
-  injured: string[];
-  doubtful: string[];
-  injuredItems?: InjuryItemWithContext[];
-  doubtfulItems?: InjuryItemWithContext[];
+export interface ResolvedStatuses {
+  injuredByIndex: Map<number, StatusEntryWithReturn>;
+  doubtfulByIndex: Map<number, StatusEntryWithReturn>;
+  suspendedByIndex: Map<number, StatusEntryWithReturn>;
 }
 
 /**
- * Applique la réconciliation selon la config :
- * - inSquadOrReturnSet : joueurs annoncés "dans le groupe" / "de retour" (news) → toujours retirés des listes blessés/douteux.
- * - Si TRUST_MPG_APTE_WHEN_CONFLICT et mpgApteSet fourni : en plus, retire tout joueur que MPG indique comme apte.
- * mpgApteSet = Set de noms normalisés (ex. depuis l'API MPG quand elle exposera un statut "available").
+ * Rapproche chaque source de l'effectif, puis applique les levées d'absence :
+ * une annonce « de retour » retire le joueur des blessés/incertains, et la
+ * disponibilité MPG fait de même si TRUST_MPG_APTE_WHEN_CONFLICT est activé.
  */
-export function resolveInjuriesWithPriority(
-  injured: string[],
-  doubtful: string[],
-  injuredItems: InjuryItemWithContext[] | undefined,
-  doubtfulItems: InjuryItemWithContext[] | undefined,
-  mpgApteSet: Set<string>,
-  config?: { trustMpgApteWhenConflict?: boolean },
-  inSquadOrReturnSet?: Set<string>
-): ResolvedInjuries {
+export function resolvePlayerStatuses(
+  players: PlayerRef[],
+  input: StatusInput,
+  config?: { trustMpgApteWhenConflict?: boolean }
+): ResolvedStatuses {
   const cfg = config ?? getStatusSourcesConfig();
-  const normalize = (s: string) =>
-    s
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/\p{Diacritic}/gu, "")
-      .replace(/\s+/g, " ")
-      .trim();
 
-  // Toujours retirer les joueurs annoncés dans le groupe / de retour (news)
-  const apteFromNews = inSquadOrReturnSet ?? new Set<string>();
-  let injuredFiltered = injured.filter((n) => !isApteMatch(n, apteFromNews));
-  let doubtfulFiltered = doubtful.filter((n) => !isApteMatch(n, apteFromNews));
-  let injuredItemsFiltered =
-    injuredItems?.filter((it) => !isApteMatch(it.playerName, apteFromNews));
-  let doubtfulItemsFiltered =
-    doubtfulItems?.filter((it) => !isApteMatch(it.playerName, apteFromNews));
+  const injuredByIndex = resolveEntriesToPlayers(players, input.injured);
+  const doubtfulByIndex = resolveEntriesToPlayers(players, input.doubtful);
+  const suspendedByIndex = resolveEntriesToPlayers(players, input.suspended);
+  const apteByIndex = resolveEntriesToPlayers(players, input.apte);
 
-  if (process.env.NODE_ENV === "development" && apteFromNews.size > 0) {
-    const removed = [
-      ...injured.filter((n) => isApteMatch(n, apteFromNews)),
-      ...doubtful.filter((n) => isApteMatch(n, apteFromNews)),
-    ];
-    if (removed.length > 0) {
-      console.log("[Status] Annonces « dans le groupe » / « de retour » : retirés des listes blessés/douteux:", removed.join(", "));
+  for (const index of apteByIndex.keys()) {
+    injuredByIndex.delete(index);
+    doubtfulByIndex.delete(index);
+  }
+
+  if (cfg.trustMpgApteWhenConflict && input.mpgAvailable.length > 0) {
+    const mpgByIndex = resolveEntriesToPlayers(players, input.mpgAvailable);
+    for (const index of mpgByIndex.keys()) {
+      injuredByIndex.delete(index);
+      doubtfulByIndex.delete(index);
     }
   }
 
-  const trustMpg = cfg.trustMpgApteWhenConflict && mpgApteSet.size > 0;
-  if (trustMpg) {
-    injuredFiltered = injuredFiltered.filter((n) => !mpgApteSet.has(normalize(n)));
-    doubtfulFiltered = doubtfulFiltered.filter((n) => !mpgApteSet.has(normalize(n)));
-    injuredItemsFiltered =
-      injuredItemsFiltered?.filter((it) => !mpgApteSet.has(normalize(it.playerName)));
-    doubtfulItemsFiltered =
-      doubtfulItemsFiltered?.filter((it) => !mpgApteSet.has(normalize(it.playerName)));
+  // Un joueur blessé n'est pas en plus « incertain ».
+  for (const index of injuredByIndex.keys()) doubtfulByIndex.delete(index);
 
-    if (process.env.NODE_ENV === "development") {
-      const removed = [
-        ...injured.filter((n) => mpgApteSet.has(normalize(n))),
-        ...doubtful.filter((n) => mpgApteSet.has(normalize(n))),
-      ];
-      if (removed.length > 0) {
-        console.log("[Status] Réconciliation MPG (apte) : retirés des listes blessés/douteux:", removed.join(", "));
-      }
-    }
-  }
-
-  return {
-    injured: injuredFiltered,
-    doubtful: doubtfulFiltered,
-    injuredItems: injuredItemsFiltered?.length ? injuredItemsFiltered : undefined,
-    doubtfulItems: doubtfulItemsFiltered?.length ? doubtfulItemsFiltered : undefined,
-  };
+  return { injuredByIndex, doubtfulByIndex, suspendedByIndex };
 }
