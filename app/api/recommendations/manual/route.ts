@@ -9,6 +9,7 @@
 import { NextResponse } from "next/server";
 import { getChampionshipData } from "@/lib/mpgstats-client";
 import { getSeasonAssists, normalizeAssistKey } from "@/lib/espn-stats";
+import { buildReasons } from "@/lib/reasons";
 import {
   getRecommendedTeamWithSubstitutes,
   getSuggestedCaptain,
@@ -104,12 +105,28 @@ export async function POST(request: Request) {
       const s =
         (p.id ? statusById.get(p.id) : undefined) ??
         (p.name ? statusByName.get(p.name) : undefined);
+      const reasons = s
+        ? buildReasons({
+            position: s.position,
+            nextOpponentRank: s.nextOpponentRank,
+            nextOpponentName: s.nextOpponentName,
+            isHome: s.isHome,
+            teamRank: s.teamRank,
+            pctTitularisations: s.pctTitularisations,
+            averageLast5: s.averageLast5,
+            momentum: s.momentum,
+            goals: s.goals,
+            assists: assistsByName.get(normalizeAssistKey(s.name)),
+            totalTeams,
+          })
+        : [];
       return {
         ...p,
         statusReason: s?.statusReason,
         statusKind: s?.status,
         nextOpponentName: s?.nextOpponentName,
         isHome: s?.isHome,
+        reasons,
       };
     };
 

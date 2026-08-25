@@ -24,6 +24,7 @@ interface ResultPlayer {
   scoreZeroReason?: "injured" | "suspended";
   nextOpponentName?: string;
   isHome?: boolean;
+  reasons?: Array<{ label: string; positive: boolean }>;
 }
 
 interface OnzeResult {
@@ -237,43 +238,61 @@ function PlayerLine({
 }) {
   const status = statusLabel(p);
   const score = p.recommendationScore;
+  const reasons = p.reasons ?? [];
   return (
     <div
-      className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 ${
-        muted
-          ? "border-[#1F4641] bg-[#0F2F2B]/50"
-          : "border-[#1F4641] bg-[#0F2F2B]"
+      className={`rounded-lg border px-3 py-2.5 ${
+        muted ? "border-[#1F4641] bg-[#0F2F2B]/50" : "border-[#1F4641] bg-[#0F2F2B]"
       }`}
     >
-      <span
-        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded text-xs font-bold ${POS_COLOR[p.position ?? "M"]}`}
-      >
-        {p.position}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5">
-          <span className="truncate font-medium text-[#F9FAFB]">{p.name}</span>
-          {captain && (
-            <span className="shrink-0 rounded bg-emerald-500 px-1 text-[10px] font-bold text-[#0A1F1C]">
-              C
+      <div className="flex items-center gap-3">
+        <span
+          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded text-xs font-bold ${POS_COLOR[p.position ?? "M"]}`}
+        >
+          {p.position}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5">
+            <span className="truncate font-medium text-[#F9FAFB]">{p.name}</span>
+            {captain && (
+              <span className="shrink-0 rounded bg-emerald-500 px-1 text-[10px] font-bold text-[#0A1F1C]">
+                C
+              </span>
+            )}
+          </span>
+          <span className="block truncate text-xs text-[#9CA3AF]">
+            {p.clubName}
+            {p.nextOpponentName && (
+              <span className="text-[#6B7280]">
+                {" → "}
+                {p.nextOpponentName} {p.isHome ? "(dom.)" : "(ext.)"}
+              </span>
+            )}
+            {status && <span className="ml-1 text-red-400">· {status}</span>}
+          </span>
+        </span>
+        {score > 0 && (
+          <span className="shrink-0 rounded-md bg-[#1F4641] px-2 py-1 text-sm font-semibold text-[#F9FAFB]">
+            {score.toFixed(1)}
+          </span>
+        )}
+      </div>
+
+      {reasons.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5 pl-10">
+          {reasons.map((r, i) => (
+            <span
+              key={i}
+              className={`rounded px-1.5 py-0.5 text-[11px] ${
+                r.positive
+                  ? "bg-emerald-500/12 text-emerald-300"
+                  : "bg-red-500/12 text-red-300"
+              }`}
+            >
+              {r.positive ? "▲" : "▼"} {r.label}
             </span>
-          )}
-        </span>
-        <span className="block truncate text-xs text-[#9CA3AF]">
-          {p.clubName}
-          {p.nextOpponentName && (
-            <span className="text-[#6B7280]">
-              {" → "}
-              {p.nextOpponentName} {p.isHome ? "(dom.)" : "(ext.)"}
-            </span>
-          )}
-          {status && <span className="ml-1 text-red-400">· {status}</span>}
-        </span>
-      </span>
-      {score > 0 && (
-        <span className="shrink-0 rounded-md bg-[#1F4641] px-2 py-1 text-sm font-semibold text-[#F9FAFB]">
-          {score.toFixed(1)}
-        </span>
+          ))}
+        </div>
       )}
     </div>
   );
