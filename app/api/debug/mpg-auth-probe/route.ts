@@ -21,6 +21,18 @@ const MPG_WEB_URL = "https://mpg.football";
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
+/** Mots-clés dont on veut lire le contexte dans le bundle. */
+const KEYWORDS = [
+  "oauth/token",
+  "oauth/revoke",
+  "client_id",
+  "clientId",
+  "grant_type",
+  "connect.ligue1",
+  "redirect_uri",
+  "authorize",
+];
+
 /** Motifs révélateurs d'un point d'entrée d'authentification. */
 const PATTERNS: Array<{ label: string; re: RegExp }> = [
   { label: "api.mpg.football/…", re: /api\.mpg\.football\/[A-Za-z0-9/_.-]{2,60}/g },
@@ -37,60 +49,45 @@ async function fetchText(url: string): Promise<string> {
 }
 
 export async function GET() {
-  const found: Record<string, Set<string>> = {};
-  for (const p of PATTERNS) found[p.label] = new Set<string>();
+  const html = await fetchText(`${MPG_WEB_URL}/auth`).catch(() => "");
 
-  const scanned: string[] = [];
-  const errors: string[] = [];
-
-  function scan(text: string) {
-    for (const p of PATTERNS) {
-      for (const m of text.matchAll(p.re)) {
-        const v = m[0].replace(/^["'`]|["'`]$/g, "");
-        if (found[p.label].size < 60) found[p.label].add(v);
-      }
-    }
-  }
-
-  let html = "";
-  try {
-    html = await fetchText(`${MPG_WEB_URL}/auth`);
-    scan(html);
-  } catch (err) {
-    errors.push(`html: ${err instanceof Error ? err.message : String(err)}`);
-  }
-
-  // Adresses des bundles JavaScript référencés par la page
-  const scriptUrls = new Set<string>();
+  const scriptUrls: string[] = [];
   for (const m of html.matchAll(/(?:src|href)=["']([^"']+\.js[^"']*)["']/g)) {
     const raw = m[1];
-    scriptUrls.add(raw.startsWith("http") ? raw : `${MPG_WEB_URL}${raw.startsWith("/") ? "" : "/"}${raw}`);
+    scriptUrls.push(raw.startsWith("http") ? raw : `${MPG_WEB_URL}${raw.startsWith("/") ? "" : "/"}${raw}`);
   }
 
-  // Les bundles principaux d'abord, et on borne pour rester raisonnable
-  const targets = Array.from(scriptUrls).slice(0, 12);
-  for (const url of targets) {
+  const extraits: Record<string, string[]> = {};
+  for (const k of KEYWORDS) extraits[k] = [];
+  const lus: string[] = [];
+
+  for (const url of scriptUrls.slice(0, 6)) {
+    let js = "";
     try {
-      const js = await fetchText(url);
-      if (js) {
-        scanned.push(`${url} (${Math.round(js.length / 1024)} ko)`);
-        scan(js);
+      js = await fetchText(url);
+    } catch {
+      continue;
+    }
+    if (!js) continue;
+    lus.push(`${url.split("/").pop()} (${Math.round(js.length / 1024)} ko)`);
+
+    for (const k of KEYWORDS) {
+      let from = 0;
+      while (extraits[k].length < 6) {
+        const i = js.indexOf(k, from);
+        if (i === -1) break;
+        extraits[k].push(js.slice(Math.max(0, i - 90), i + 130).replace(/\s+/g, " "));
+        from = i + k.length;
       }
-    } catch (err) {
-      errors.push(`${url}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
   return NextResponse.json(
     {
-      note: "Sonde de diagnostic — lecture du JavaScript public de MPG. À supprimer après usage.",
+      note: "Sonde de diagnostic — contexte des mots-clés d'authentification. À supprimer après usage.",
       date: new Date().toISOString(),
-      scriptsTrouves: scriptUrls.size,
-      scriptsLus: scanned,
-      erreurs: errors,
-      resultats: Object.fromEntries(
-        Object.entries(found).map(([k, v]) => [k, Array.from(v)])
-      ),
+      bundlesLus: lus,
+      extraits,
     },
     { headers: { "Cache-Control": "no-store" } }
   );
