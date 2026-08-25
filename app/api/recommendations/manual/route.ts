@@ -63,8 +63,6 @@ export async function POST(request: Request) {
       quotation: p.quotation,
       nextOpponentRank: p.nextOpponentRank,
       isHome: p.isHome,
-      opponentGoalsFor: p.opponentGoalsFor,
-      opponentGoalsAgainst: p.opponentGoalsAgainst,
       teamFormWinsLast5: p.teamFormWinsLast5,
       isInjured: p.status === "injured",
       isSuspended: p.status === "suspended",

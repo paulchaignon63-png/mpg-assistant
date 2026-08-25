@@ -264,8 +264,6 @@ export interface MpgStatsFullPlayer extends RosterPlayer {
   /** Contexte du prochain match (adversaire, domicile), pour le scoring. */
   nextOpponentRank?: number;
   isHome?: boolean;
-  opponentGoalsFor?: number;
-  opponentGoalsAgainst?: number;
   teamFormWinsLast5?: number;
   /** Pour l'affichage. */
   nextOpponentName?: string;
@@ -392,16 +390,16 @@ export async function getChampionshipData(
   const currentClubIds = (data.mL?.aS?.c ?? []).filter((id) => clubById.has(id));
   const totalTeams = currentClubIds.length || 18;
 
+  // Classement par Elo : mesure de force stable dès la 1re journée (l'Elo se
+  // reporte de saison en saison), là où les points sur 1-2 matchs sont du bruit.
+  // Les points départagent les Elo très proches.
   const ranked = [...currentClubIds].sort((a, b) => {
     const ca = clubById.get(a)!;
     const cb = clubById.get(b)!;
-    const pa = ca.s?.p ?? 0;
-    const pb = cb.s?.p ?? 0;
-    if (pb !== pa) return pb - pa;
-    const gda = (ca.s?.GS ?? 0) - (ca.s?.GA ?? 0);
-    const gdb = (cb.s?.GS ?? 0) - (cb.s?.GA ?? 0);
-    if (gdb !== gda) return gdb - gda;
-    return (cb.el ?? 0) - (ca.el ?? 0);
+    const ea = ca.el ?? 0;
+    const eb = cb.el ?? 0;
+    if (eb !== ea) return eb - ea;
+    return (cb.s?.p ?? 0) - (ca.s?.p ?? 0);
   });
   const rankByClub = new Map<number, number>();
   ranked.forEach((id, i) => rankByClub.set(id, i + 1));
@@ -421,11 +419,13 @@ export async function getChampionshipData(
     const teamFormWinsLast5 = club?.s?.w != null ? Math.min(5, club.s.w) : undefined;
     if (!next) return { teamFormWinsLast5 };
     const opp = clubById.get(next.oppId);
+    // Les buts pour/contre ne sont volontairement pas transmis : les seuils du
+    // moteur sont calibrés sur des totaux de fin de saison et s'emballent sur
+    // 1-2 matchs. La force de l'adversaire passe par le rang (Elo) et le
+    // domicile, tous deux fiables immédiatement.
     return {
       nextOpponentRank: rankByClub.get(next.oppId),
       isHome: next.isHome,
-      opponentGoalsFor: opp?.s?.GS,
-      opponentGoalsAgainst: opp?.s?.GA,
       teamFormWinsLast5,
       nextOpponentName: opp?.n ?? opp?.rn,
     };
@@ -482,8 +482,6 @@ export async function getChampionshipData(
       statusReason: reason,
       nextOpponentRank: ctx?.nextOpponentRank,
       isHome: ctx?.isHome,
-      opponentGoalsFor: ctx?.opponentGoalsFor,
-      opponentGoalsAgainst: ctx?.opponentGoalsAgainst,
       teamFormWinsLast5: ctx?.teamFormWinsLast5,
       nextOpponentName: ctx?.nextOpponentName,
     });

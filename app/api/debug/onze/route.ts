@@ -30,7 +30,6 @@ export async function GET() {
   const withCtx: PoolPlayer[] = selected.map((p) => ({
     ...base(p),
     nextOpponentRank: p.nextOpponentRank, isHome: p.isHome,
-    opponentGoalsFor: p.opponentGoalsFor, opponentGoalsAgainst: p.opponentGoalsAgainst,
     teamFormWinsLast5: p.teamFormWinsLast5,
   }));
   const withoutCtx: PoolPlayer[] = selected.map(base);
