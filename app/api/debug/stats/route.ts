@@ -1,25 +1,36 @@
-/** Diagnostic temporaire : stats fines rebranchées. À SUPPRIMER. */
+/** Diagnostic temporaire : matchs bruts d'un passeur. À SUPPRIMER. */
 import { NextResponse } from "next/server";
-import { getChampionshipData } from "@/lib/mpgstats-client";
 
-// Barcola, Vitinha, Gradit, Dembélé, Doué, un défenseur, un gardien.
-const IDS = ["mpg_10491", "mpg_7263", "mpg_2710", "mpg_1557", "mpg_11691", "mpg_1980", "mpg_6865"];
+const UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36";
 
 export async function GET() {
-  const { players, playedRounds } = await getChampionshipData("1");
-  const rows = IDS.map((id) => {
-    const p = players.get(id);
-    if (!p) return { id, found: false };
-    return {
-      nom: p.name,
-      poste: p.position,
-      club: p.club,
-      passes_dec: p.assists,
-      titularisation: p.pctTitularisations,
-      precision_passes: p.accuratePassPct,
-      buts: p.goals,
-      note_moy: p.average,
-    };
+  const res = await fetch("https://backend.mpgstats.fr/leagues/Ligue-1_v2.json", {
+    headers: { "User-Agent": UA },
   });
-  return NextResponse.json({ playedRounds, joueurs: rows }, { headers: { "Cache-Control": "no-store" } });
+  const data = (await res.json()) as { p?: Array<Record<string, unknown>> };
+  const players = data.p ?? [];
+
+  // Vitinha (7263), Doué (11691), Barcola (10491) — passeurs.
+  const wanted = new Set([7263, 11691, 10491]);
+  const out = players
+    .filter((p) => wanted.has(p.i as number))
+    .map((p) => {
+      const matches = (p.p as Array<Record<string, number>>) ?? [];
+      const withA = matches.filter((m) => (m.a ?? 0) > 0);
+      const withG = matches.filter((m) => (m.g ?? 0) > 0);
+      return {
+        nom: p.n,
+        nbMatchs: matches.length,
+        D_min: Math.min(...matches.map((m) => m.D ?? 0)),
+        D_max: Math.max(...matches.map((m) => m.D ?? 0)),
+        matchs_avec_passe_dec: withA.length,
+        exemples_passe_dec: withA.slice(0, 4),
+        matchs_avec_but: withG.length,
+        exemples_but: withG.slice(0, 2),
+        toutes_cles_a: matches.some((m) => "a" in m),
+      };
+    });
+
+  return NextResponse.json({ out }, { headers: { "Cache-Control": "no-store" } });
 }
