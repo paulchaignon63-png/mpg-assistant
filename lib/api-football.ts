@@ -75,37 +75,11 @@ export class ApiFootballClient {
     if (params) {
       Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
     }
-    // #region agent log
-    fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "api-football.ts:fetch",
-        message: "HTTP request to API-Football",
-        data: { endpoint, fullUrl: url.toString() },
-        timestamp: Date.now(),
-        hypothesisId: "D",
-      }),
-    }).catch(() => {});
-    // #endregion
     const res = await fetch(url.toString(), {
       headers: { "x-apisports-key": this.apiKey },
       cache: "no-store", // désactive le cache Next.js pour que chaque appel compte sur le dashboard
     });
 
-    // #region agent log
-    fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "api-football.ts:fetch:response",
-        message: "API-Football response received",
-        data: { endpoint, status: res.status, ok: res.ok },
-        timestamp: Date.now(),
-        hypothesisId: "D",
-      }),
-    }).catch(() => {});
-    // #endregion
 
     if (process.env.NODE_ENV === "development") {
       // eslint-disable-next-line no-console

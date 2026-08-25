@@ -781,9 +781,6 @@ export function getRecommendedTeamWithSubstitutes(
       }
       return base;
     });
-  // #region agent log
-  (async()=>{try{await fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({location:"recommendation.ts:getRecommendedTeamWithSubstitutes",message:"lofteurs computed",data:{playersCount:players.length,recommendedCount:recommended.length,selectedKeysSize:selectedKeys.size,lofteursCount:lofteurs.length},timestamp:Date.now(),hypothesisId:"H3,H4"})})}catch{}})();
-  // #endregion
   return { recommended, substitutes, lofteurs };
 }
 

@@ -141,19 +141,6 @@ export async function fetchInjuries(
 ): Promise<InjuriesResult> {
   if (!apiKey?.trim()) return { injured: [], doubtful: [] };
 
-  // #region agent log
-  fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      location: "injuries-service.ts:fetchInjuries",
-      message: "fetchInjuries entered, about to call API",
-      data: { championshipId, leagueId: getLeagueId(championshipId) },
-      timestamp: Date.now(),
-      hypothesisId: "A,B",
-    }),
-  }).catch(() => {});
-  // #endregion
 
   if (process.env.NODE_ENV === "development") {
     const season = getApiFootballSeason();
@@ -165,19 +152,6 @@ export async function fetchInjuries(
     const leagueId = getLeagueId(championshipId);
     const season = getApiFootballSeason(); // 2025 pour L1 2025-2026 (année de début)
     const client = createApiFootballClient(apiKey);
-    // #region agent log
-    fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "injuries-service.ts:pre-getInjuries",
-        message: "about to call client.getInjuries",
-        data: { leagueId, season },
-        timestamp: Date.now(),
-        hypothesisId: "B",
-      }),
-    }).catch(() => {});
-    // #endregion
     const raw = await client.getInjuries(leagueId, season);
     const rawArr = Array.isArray(raw) ? raw : [];
 
@@ -210,19 +184,6 @@ export async function fetchInjuries(
       // eslint-disable-next-line no-console
       console.log("[API-Football] fetchInjuries ÉCHEC:", err instanceof Error ? err.message : String(err));
     }
-    // #region agent log
-    fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "injuries-service.ts:catch",
-        message: "fetchInjuries failed",
-        data: { error: err instanceof Error ? err.message : String(err) },
-        timestamp: Date.now(),
-        hypothesisId: "D",
-      }),
-    }).catch(() => {});
-    // #endregion
     return { injured: [], doubtful: [] };
   }
 }

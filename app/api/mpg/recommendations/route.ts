@@ -264,19 +264,6 @@ export async function POST(request: NextRequest) {
     // Pour le pool: utiliser effectiveChampId ou championshipId
     const poolChampId = effectiveChampId ?? (championshipId && String(championshipId).trim() ? championshipId : undefined);
     const willCallApiFootball = !!(effectiveChampId && apiKey?.trim() && enableApiFootball);
-    // #region agent log
-    fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "recommendations/route.ts:POST",
-        message: "recommendations called",
-        data: { championshipId, effectiveChampId, hasApiKey: !!apiKey?.trim(), willCallApiFootball },
-        timestamp: Date.now(),
-        hypothesisId: "A,B,C,E",
-      }),
-    }).catch(() => {});
-    // #endregion
 
     if (process.env.NODE_ENV === "development") {
       // eslint-disable-next-line no-console
@@ -347,29 +334,6 @@ export async function POST(request: NextRequest) {
     // Le coach MPG sert uniquement de fallback si formation non fournie (chargement initial).
     const form = formation;
 
-    // #region agent log
-    const formationLog = {
-      location: "recommendations/route.ts:formation",
-      message: "formation used (post-fix: always request)",
-      data: {
-        formationRequested: formation,
-        coachComposition: coachFormation?.matchTeamFormation?.composition,
-        formUsed: form,
-        runId: "post-fix",
-      },
-      timestamp: Date.now(),
-      hypothesisId: "H1",
-    };
-    fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(formationLog),
-    }).catch(() => {});
-    if (process.env.NODE_ENV === "development") {
-      // eslint-disable-next-line no-console
-      console.log("[DEBUG formation]", JSON.stringify(formationLog.data));
-    }
-    // #endregion
 
     const normForMatch = (s: string) =>
       s
@@ -507,46 +471,6 @@ export async function POST(request: NextRequest) {
     }
 
     const playersWithAdvRank = poolPlayers.filter((p) => p.nextOpponentRank != null).length;
-    // #region agent log
-    const injuredFull = injuriesResolved.injured;
-    const injuredItems = injuriesResolved.injuredItems ?? [];
-    const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "").replace(/\s+/g, " ").trim();
-    const targetNames = ["Dembélé Ousmane", "Clauss Jonathan", "Wahi Elye", "Sangaré Mamadou", "Kaba Mohamed", "Akliouche Maghnes"];
-    const scoreZeroReasons: Record<string, "injured" | "suspended" | "unknown"> = {};
-    const isInSuspendedSetForLog = (n: string) => {
-      const nNorm = norm(n);
-      return suspendedNames.has(nNorm) || Array.from(suspendedNames).some((s) => s.includes(nNorm) || nNorm.includes(s));
-    };
-    for (const name of targetNames) {
-      const poolPlayer = poolPlayers.find((p) => {
-        const pName = p.name ?? [p.lastName, p.firstName].filter(Boolean).join(" ").trim();
-        return norm(pName || "").includes(norm(name)) || norm(name).includes(norm(pName || ""));
-      });
-      const club = (poolPlayer as { clubName?: string })?.clubName;
-      const inInjured = isPlayerInInjuryList(name, injuredFull) || (injuredItems.length > 0 && isPlayerInjuryMatchWithContext(name, club, injuredItems));
-      const inSuspended = isInSuspendedSetForLog(name) || (poolPlayer && (poolPlayer as { isSuspended?: boolean }).isSuspended === true);
-      if (inInjured) scoreZeroReasons[name] = "injured";
-      else if (inSuspended) scoreZeroReasons[name] = "suspended";
-      else scoreZeroReasons[name] = "unknown";
-    }
-    fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "recommendations/route.ts:dataReceived",
-        message: "Injuries and suspensions for score-0 lofteurs",
-        data: {
-          injuredCount: injuredFull.length,
-          injuredFull,
-          injuredItemsNames: injuredItems.map((i) => i.playerName),
-          suspendedList: Array.from(suspendedNames),
-          scoreZeroReasons,
-        },
-        timestamp: Date.now(),
-        hypothesisId: "A,B",
-      }),
-    }).catch(() => {});
-    // #endregion
 
     const championshipDays =
       (division as { liveState?: { currentGameWeek?: number } } | null)?.liveState?.currentGameWeek ?? 15;
@@ -581,101 +505,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // #region agent log
-    (() => {
-      try {
-        const norm = (s: string | undefined) =>
-          (s ?? "")
-            .toLowerCase()
-            .normalize("NFD")
-            .replace(/\p{Diacritic}/gu, "")
-            .replace(/\s+/g, " ")
-            .trim();
-        const targets = ["kouassi", "sulc", "clauss"];
-        const starters = recommended;
-        const subsAll = (["G", "D", "M", "A"] as const).flatMap((pos) => substitutes[pos] ?? []);
-        const allLofteurs = lofteurs;
-        const entries: Array<{
-          target: string;
-          inStarters: boolean;
-          inSubs: boolean;
-          inLofteurs: boolean;
-          info?: {
-            name?: string;
-            position?: string;
-            recommendationScore: number;
-            isInjured?: boolean;
-            isSuspended?: boolean;
-            scoreZeroReason?: string;
-          };
-        }> = [];
-        for (const t of targets) {
-          const matchIn = (arr: Array<{ name?: string }>) =>
-            arr.find((p) => {
-              const n = norm(p.name);
-              return n.includes(t) || t.includes(n);
-            });
-          const sMatch = matchIn(starters);
-          const subMatch = matchIn(subsAll);
-          const lMatch = matchIn(allLofteurs);
-          const p = (sMatch ?? subMatch ?? lMatch) as
-            | (PoolPlayer & { position?: string; recommendationScore?: number; isInjured?: boolean; isSuspended?: boolean; scoreZeroReason?: string })
-            | undefined;
-          entries.push({
-            target: t,
-            inStarters: !!sMatch,
-            inSubs: !!subMatch,
-            inLofteurs: !!lMatch,
-            info: p && {
-              name: p.name,
-              position: (p as { position?: string })?.position,
-              recommendationScore: (p as { recommendationScore?: number }).recommendationScore ?? 0,
-              isInjured: (p as { isInjured?: boolean }).isInjured,
-              isSuspended: (p as { isSuspended?: boolean }).isSuspended,
-              scoreZeroReason: (p as { scoreZeroReason?: string }).scoreZeroReason,
-            },
-          });
-        }
-        fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            location: "recommendations/route.ts:debugTargets",
-            message: "Debug injured targets (Kouassi, Sulc, Clauss)",
-            data: {
-              entries,
-            },
-            timestamp: Date.now(),
-            hypothesisId: "H1,H2,H3",
-          }),
-        }).catch(() => {});
-      } catch {
-        // ignore debug errors
-      }
-    })();
-    // #endregion
 
-    // #region agent log
-    const byPosCount = { G: 0, D: 0, M: 0, A: 0 };
-    for (const p of recommended) {
-      if (p.position && p.position in byPosCount) byPosCount[p.position as keyof typeof byPosCount]++;
-    }
-    fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "recommendations/route.ts:response",
-        message: "recommended lineup counts",
-        data: { formUsed: form, byPosCount, recommendedCount: recommended.length },
-        timestamp: Date.now(),
-        hypothesisId: "H1",
-      }),
-    }).catch(() => {});
-    // #endregion
 
-    // #region agent log
-    fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({location:"recommendations/route.ts:response",message:"lofteurs before send",data:{lofteursLength:lofteurs.length,lofteursSample:lofteurs.slice(0,3),recommendedCount:recommended.length},timestamp:Date.now(),hypothesisId:"H2,H3,H4"})}).catch(()=>{});
-    // #endregion
 
     const suggestedCaptain = getSuggestedCaptain(recommended);
     const suggestedCaptainId = suggestedCaptain?.id ?? suggestedCaptain?.name ?? null;

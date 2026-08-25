@@ -93,19 +93,6 @@ export async function fetchOpponentRanksByClub(
   const map = new Map<string, number>();
   if (!apiKey?.trim()) return { rankByClub: map, totalTeams: 18 };
 
-  // #region agent log
-  fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      location: "opponent-rank-service.ts:fetchOpponentRanksByClub",
-      message: "fetchOpponentRanksByClub entered, about to call API",
-      data: { championshipId, leagueId: getLeagueId(championshipId) },
-      timestamp: Date.now(),
-      hypothesisId: "A,B",
-    }),
-  }).catch(() => {});
-  // #endregion
 
   if (process.env.NODE_ENV === "development") {
     // eslint-disable-next-line no-console
@@ -164,19 +151,6 @@ export async function fetchOpponentRanksByClub(
       // eslint-disable-next-line no-console
       console.log("[API-Football] fetchOpponentRanks ÉCHEC:", err instanceof Error ? err.message : String(err));
     }
-    // #region agent log
-    fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "opponent-rank-service.ts:catch",
-        message: "fetchOpponentRanksByClub failed",
-        data: { error: err instanceof Error ? err.message : String(err) },
-        timestamp: Date.now(),
-        hypothesisId: "D",
-      }),
-    }).catch(() => {});
-    // #endregion
     return { rankByClub: map, totalTeams: 18 };
   }
 }

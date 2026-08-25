@@ -154,9 +154,6 @@ export default function TeamPage({
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Erreur");
         if (!cancelled) {
-          // #region agent log
-          fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({location:"equipe/page.tsx:initialLoad",message:"API response received",data:{hasLofteurs:!!data.lofteurs,lofteursLength:data.lofteurs?.length??0,lofteursSample:data.lofteurs?.slice(0,3)},timestamp:Date.now(),hypothesisId:"H1,H2"})}).catch(()=>{});
-          // #endregion
           setTeamName(data.team ?? "Mon équipe");
           setRecommended(data.recommended ?? []);
           setSuggestedCaptainId(data.suggestedCaptainId ?? null);
@@ -180,19 +177,6 @@ export default function TeamPage({
 
   async function handleFormationChange(newFormation: number) {
     const prev = selectedFormation;
-    // #region agent log
-    fetch("http://127.0.0.1:7244/ingest/6ee8e683-6091-464b-9212-cd2f05a911be", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "equipe/page.tsx:handleFormationChange",
-        message: "formation change requested",
-        data: { newFormation, prev, teamId, hasTeamId: !!teamId },
-        timestamp: Date.now(),
-        hypothesisId: "H2,H4",
-      }),
-    }).catch(() => {});
-    // #endregion
     setSelectedFormation(newFormation);
     setFormationLoading(true);
     setError("");
