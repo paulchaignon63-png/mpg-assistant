@@ -22,6 +22,8 @@ interface ResultPlayer {
   statusReason?: string;
   statusKind?: "ok" | "injured" | "suspended" | "doubtful";
   scoreZeroReason?: "injured" | "suspended";
+  nextOpponentName?: string;
+  isHome?: boolean;
 }
 
 interface OnzeResult {
@@ -259,6 +261,12 @@ function PlayerLine({
         </span>
         <span className="block truncate text-xs text-[#9CA3AF]">
           {p.clubName}
+          {p.nextOpponentName && (
+            <span className="text-[#6B7280]">
+              {" → "}
+              {p.nextOpponentName} {p.isHome ? "(dom.)" : "(ext.)"}
+            </span>
+          )}
           {status && <span className="ml-1 text-red-400">· {status}</span>}
         </span>
       </span>
