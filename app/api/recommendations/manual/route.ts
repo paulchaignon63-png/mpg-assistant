@@ -61,7 +61,6 @@ export async function POST(request: Request) {
       last5Minutes: p.last5Minutes,
       last5OpponentRounds: p.last5OpponentRounds,
       quotation: p.quotation,
-      assists: p.assists,
       pctTitularisations: p.pctTitularisations,
       accuratePassPct: p.accuratePassPct,
       nextOpponentRank: p.nextOpponentRank,

@@ -28,7 +28,6 @@ export interface MpgStatsMatch {
   n?: number; // note du match
   m?: number; // minutes
   g?: number; // buts
-  a?: number; // passes décisives
   D?: number; // numéro journée (positif = saison en cours, négatif = saison passée)
 }
 
@@ -260,7 +259,6 @@ export interface MpgStatsFullPlayer extends RosterPlayer {
   last5Minutes?: number[];
   last5OpponentRounds?: number[];
   quotation?: number;
-  assists?: number;
   pctTitularisations?: number;
   accuratePassPct?: number;
   status: "ok" | "injured" | "suspended" | "doubtful";
@@ -468,16 +466,6 @@ export async function getChampionshipData(
       momentum = al3 - ap3;
     }
 
-    // Passes décisives : on somme le champ `a` des matchs. D>0 = saison en cours,
-    // D<0 = saison passée. Tant que la saison en cours a peu de matchs, la saison
-    // passée sert de référence (comme un humain se fie à l'an dernier au coup
-    // d'envoi), puis on bascule sur l'actuelle quand elle a assez de matière.
-    const allMatches = p.p ?? [];
-    const curMatches = allMatches.filter((mm) => (mm.D ?? 0) > 0);
-    const prevMatches = allMatches.filter((mm) => (mm.D ?? 0) < 0);
-    const sumA = (arr: MpgStatsMatch[]) => arr.reduce((t, mm) => t + (mm.a ?? 0), 0);
-    const assists = curMatches.length >= 6 ? sumA(curMatches) : sumA(prevMatches);
-
     const pctTitularisations = (p.s as { Otr?: number } | undefined)?.Otr;
     const rawPassPct = p.es?.aP ?? p.es?.oaP;
     const accuratePassPct = rawPassPct != null ? Math.round(rawPassPct * 100) : undefined;
@@ -500,7 +488,6 @@ export async function getChampionshipData(
       last5Minutes: minutes.some((n) => n > 0) ? minutes : undefined,
       last5OpponentRounds: rounds.some((n) => n > 0) ? rounds : undefined,
       quotation: p.q,
-      assists,
       pctTitularisations,
       accuratePassPct,
       status,
