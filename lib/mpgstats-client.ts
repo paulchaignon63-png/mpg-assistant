@@ -245,3 +245,162 @@ export async function getChampionshipRoster(
   );
   return roster;
 }
+
+/** Joueur du vivier enrichi de ses stats et de son statut, prêt pour le moteur. */
+export interface MpgStatsFullPlayer extends RosterPlayer {
+  average: number;
+  matchs: number;
+  goals: number;
+  averageLast5?: number;
+  momentum?: number;
+  last5Notes?: number[];
+  last5Minutes?: number[];
+  last5OpponentRounds?: number[];
+  quotation?: number;
+  status: "ok" | "injured" | "suspended" | "doubtful";
+  statusReason?: string;
+}
+
+/** Résultat complet d'un championnat : joueurs enrichis + date du prochain match. */
+export interface ChampionshipData {
+  players: Map<string, MpgStatsFullPlayer>;
+  nextMatchDate?: Date;
+  /** Nombre de journées déjà jouées (pour la régularité). */
+  playedRounds: number;
+}
+
+interface MpgStatsForfait {
+  t?: string; // type : "I" blessure, "S" suspension, autre = incertain
+  d?: string; // libellé ("Forfait", "Blessé"…)
+  dE?: number; // timestamp (s) associé
+  e?: number; // id d'événement concerné
+}
+
+interface MpgStatsEvent {
+  i?: number; // id
+  dB?: number; // coup d'envoi (timestamp s)
+  d?: number; // numéro de journée
+}
+
+interface MpgStatsFullRow extends MpgStatsRosterPlayer {
+  c?: number;
+  q?: number; // cote
+  s?: MpgStatsPlayer["s"];
+  p?: MpgStatsMatch[];
+  fo?: MpgStatsForfait[];
+}
+
+function statusFromForfaits(
+  fo: MpgStatsForfait[] | undefined,
+  upcomingEventIds: Set<number>
+): { status: MpgStatsFullPlayer["status"]; reason?: string } {
+  if (!fo?.length) return { status: "ok" };
+  // On ne retient que les forfaits qui concernent la prochaine journée.
+  const relevant = fo.filter((f) => f.e != null && upcomingEventIds.has(f.e));
+  if (relevant.length === 0) return { status: "ok" };
+  const f = relevant[0];
+  const type = (f.t ?? "").toUpperCase();
+  if (type === "S") return { status: "suspended", reason: f.d };
+  if (type === "I") return { status: "injured", reason: f.d };
+  return { status: "doubtful", reason: f.d };
+}
+
+/**
+ * Données complètes d'un championnat pour le calcul du meilleur 11, en un seul
+ * appel MPGStats : chaque joueur avec son club, son poste, ses stats de forme
+ * et son statut (blessé/suspendu pour la prochaine journée), plus la date du
+ * prochain match. Aucune dépendance à MPG ni Sofascore.
+ */
+export async function getChampionshipData(
+  championshipId: number | string
+): Promise<ChampionshipData> {
+  const slug = getLeagueSlug(championshipId);
+  const res = await fetch(`${MPGSTATS_URL}/leagues/${slug}_v2.json`);
+  if (!res.ok) return { players: new Map(), playedRounds: 0 };
+
+  const data = (await res.json()) as {
+    p?: MpgStatsFullRow[];
+    c?: MpgStatsClub[];
+    e?: MpgStatsEvent[];
+  };
+
+  const clubNameById = new Map<number, string>();
+  for (const club of data.c ?? []) {
+    if (club.i != null) clubNameById.set(club.i, club.n ?? club.rn ?? `Club ${club.i}`);
+  }
+
+  // Prochaine journée : événements à venir les plus proches (fenêtre de ~5 jours).
+  const now = Math.floor(Date.now() / 1000);
+  const future = (data.e ?? [])
+    .filter((e) => e.dB != null && e.dB > now)
+    .sort((a, b) => (a.dB ?? 0) - (b.dB ?? 0));
+  const nextKickoff = future[0]?.dB;
+  const upcomingEventIds = new Set<number>();
+  let nextMatchDate: Date | undefined;
+  if (nextKickoff != null) {
+    nextMatchDate = new Date(nextKickoff * 1000);
+    const windowEnd = nextKickoff + 5 * 24 * 60 * 60;
+    for (const e of future) {
+      if (e.dB != null && e.dB <= windowEnd && e.i != null) upcomingEventIds.add(e.i);
+    }
+  }
+
+  // Journées déjà jouées = plus grand numéro de journée passé.
+  let playedRounds = 0;
+  for (const e of data.e ?? []) {
+    if (e.dB != null && e.dB <= now && e.d != null) playedRounds = Math.max(playedRounds, e.d);
+  }
+
+  const players = new Map<string, MpgStatsFullPlayer>();
+  for (const p of data.p ?? []) {
+    if (p.i == null) continue;
+    const last = (p.n ?? "").trim();
+    const first = (p.f ?? "").trim();
+    const name = [first, last].filter(Boolean).join(" ").trim();
+    if (!name) continue;
+
+    const stats = p.s;
+    const average = stats ? stats.a ?? stats.Sa ?? stats.Oa ?? 0 : 0;
+    const matchs = stats ? stats.n ?? stats.Sn ?? stats.On ?? 0 : 0;
+    const goals = stats ? stats.g ?? stats.Sg ?? stats.Og ?? 0 : 0;
+
+    const matches = p.p ?? [];
+    const last5 = matches.slice(0, 5);
+    const notes = last5.map((m) => m.n ?? 0);
+    const minutes = last5.map((m) => m.m ?? 0);
+    const rounds = last5.map((m) => m.D ?? 0);
+    const played5 = last5.map((m) => m.n ?? 0).filter((n) => n > 0);
+    const averageLast5 =
+      played5.length > 0 ? played5.reduce((a, b) => a + b, 0) / played5.length : undefined;
+    let momentum: number | undefined;
+    if (matches.length >= 6) {
+      const l3 = matches.slice(0, 3).map((m) => m.n ?? 0).filter((n) => n > 0);
+      const p3 = matches.slice(3, 6).map((m) => m.n ?? 0).filter((n) => n > 0);
+      const al3 = l3.length ? l3.reduce((a, b) => a + b, 0) / l3.length : 0;
+      const ap3 = p3.length ? p3.reduce((a, b) => a + b, 0) / p3.length : 0;
+      momentum = al3 - ap3;
+    }
+
+    const { status, reason } = statusFromForfaits(p.fo, upcomingEventIds);
+
+    players.set(`mpg_${p.i}`, {
+      id: `mpg_${p.i}`,
+      name,
+      club: p.c != null ? clubNameById.get(p.c) ?? "" : "",
+      position: mapMpgStatsPosition(p.fp),
+      average,
+      matchs,
+      goals,
+      averageLast5,
+      momentum,
+      last5Notes: notes.some((n) => n > 0) ? notes : undefined,
+      last5Minutes: minutes.some((n) => n > 0) ? minutes : undefined,
+      last5OpponentRounds: rounds.some((n) => n > 0) ? rounds : undefined,
+      quotation: p.q,
+      status,
+      statusReason: reason,
+    });
+  }
+
+  return { players, nextMatchDate, playedRounds };
+}
