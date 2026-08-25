@@ -265,6 +265,8 @@ export interface MpgStatsFullPlayer extends RosterPlayer {
   nextOpponentRank?: number;
   isHome?: boolean;
   teamFormWinsLast5?: number;
+  /** Rang (force) de l'équipe du joueur, 1 = meilleure. */
+  teamRank?: number;
   /** Pour l'affichage. */
   nextOpponentName?: string;
 }
@@ -463,6 +465,7 @@ export async function getChampionshipData(
 
     const { status, reason } = statusFromForfaits(p.fo, upcomingEventIds);
     const ctx = contextForClub(p.c);
+    const teamRank = p.c != null ? rankByClub.get(p.c) : undefined;
 
     players.set(`mpg_${p.i}`, {
       id: `mpg_${p.i}`,
@@ -483,6 +486,7 @@ export async function getChampionshipData(
       nextOpponentRank: ctx?.nextOpponentRank,
       isHome: ctx?.isHome,
       teamFormWinsLast5: ctx?.teamFormWinsLast5,
+      teamRank,
       nextOpponentName: ctx?.nextOpponentName,
     });
   }

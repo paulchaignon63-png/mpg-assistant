@@ -64,6 +64,7 @@ export async function POST(request: Request) {
       nextOpponentRank: p.nextOpponentRank,
       isHome: p.isHome,
       teamFormWinsLast5: p.teamFormWinsLast5,
+      teamRank: p.teamRank,
       isInjured: p.status === "injured",
       isSuspended: p.status === "suspended",
       isDoubtful: p.status === "doubtful",

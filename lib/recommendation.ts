@@ -157,6 +157,8 @@ export interface PoolPlayer {
   clubId?: string;
   clubName?: string;
   nextOpponentRank?: number;
+  /** Rang (force) de l'équipe DU joueur, 1 = meilleure. Clean sheet & création. */
+  teamRank?: number;
   pctTitularisations?: number;
   yellowCards?: number;
   redCards?: number;
@@ -415,6 +417,31 @@ function getContexteProchainMatch(
   return termRang + bonusDomicile + bonusMatchup;
 }
 
+/**
+ * Multiplicateur « force de l'équipe du joueur ».
+ *
+ * C'est la finesse qui distingue une vraie reco d'une simple recopie des notes :
+ * un gardien/défenseur d'une grosse équipe (Lens, Marseille…) a une bien
+ * meilleure espérance de points (clean sheet, victoire) qu'un joueur d'un
+ * mal-classé, quasi indépendamment de sa dernière note. L'effet est le plus
+ * fort pour G/D (défense collective), moindre pour A (une grosse équipe crée
+ * plus d'occasions), et il est amplifié en début de saison, quand la forme
+ * individuelle n'a pas encore de valeur statistique.
+ */
+function getOwnTeamMultiplier(
+  pos: Position,
+  teamRank: number | undefined,
+  totalTeams: number,
+  daysPlayed: number
+): number {
+  if (teamRank == null || totalTeams < 2) return 1;
+  const strength = (totalTeams - teamRank) / (totalTeams - 1); // 1 = meilleure équipe
+  const baseAmp = pos === "G" || pos === "D" ? 0.3 : pos === "A" ? 0.22 : 0.16;
+  const youth = Math.max(0, Math.min(1, (5 - daysPlayed) / 5)); // 1 au coup d'envoi de la saison
+  const amp = baseAmp * (1 + 0.3 * youth);
+  return 1 + amp * (2 * strength - 1);
+}
+
 /** returnDateMult: return après match → 0; return 1-2j avant → 0.7; sinon 1.0 */
 function getReturnDateMult(
   injuryReturnDate: string | undefined,
@@ -611,7 +638,17 @@ export function computePlayerScore(
     nextMatchDate
   );
 
-  let score = base * adversaryMult * homeAwayMult * fatigueMult * teamFormMult * returnDateMult * advAttackDefenseMult;
+  const ownTeamMult = getOwnTeamMultiplier(pos, player.teamRank, totalTeams, days);
+
+  let score =
+    base *
+    adversaryMult *
+    homeAwayMult *
+    fatigueMult *
+    teamFormMult *
+    returnDateMult *
+    advAttackDefenseMult *
+    ownTeamMult;
 
   const rc = player.redCards ?? 0;
   if (rc >= 3) score *= 0.82;
