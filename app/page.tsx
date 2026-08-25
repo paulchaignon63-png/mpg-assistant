@@ -1,102 +1,96 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { listLeagues, deleteLeague, type ManualLeague } from "@/lib/manual-league";
+import { getChampionshipById } from "@/lib/championships";
+import { EmptyState } from "@/components/EmptyState";
 
-export default function LoginPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const router = useRouter();
+export default function HomePage() {
+  const [leagues, setLeagues] = useState<ManualLeague[] | null>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
-    try {
-      const res = await fetch("/api/mpg/auth", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Erreur de connexion");
-      localStorage.setItem("mpg_token", data.token);
-      localStorage.setItem("mpg_userId", data.userId);
-      router.push("/dashboard");
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Erreur de connexion");
-    } finally {
-      setLoading(false);
-    }
+  useEffect(() => {
+    setLeagues(listLeagues());
+  }, []);
+
+  function handleDelete(id: string, name: string) {
+    if (!confirm(`Supprimer la ligue « ${name} » ?`)) return;
+    deleteLeague(id);
+    setLeagues(listLeagues());
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-[#0A1F1C] p-4">
-      <div className="w-full max-w-md rounded-2xl border border-[#1F4641] bg-[#0F2F2B] p-8 shadow-xl">
-        <div className="mb-4 flex justify-center">
-          <img src="/logo.png" alt="Le 11 parfait" className="h-16 w-16" />
-        </div>
-        <h1 className="mb-2 text-center text-2xl font-bold text-[#F9FAFB] sm:text-3xl">
-          Le 11 parfait
-        </h1>
-        <p className="mb-6 text-center text-[#9CA3AF]">
-          Connecte-toi avec tes identifiants MPG
-        </p>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+    <div className="min-h-screen bg-[#0A1F1C] px-4 pb-24 pt-8">
+      <div className="mx-auto w-full max-w-md">
+        <header className="mb-8 flex items-center gap-3">
+          <img src="/logo.png" alt="" className="h-10 w-10" />
           <div>
-            <label
-              htmlFor="email"
-              className="mb-1 block text-sm font-medium text-[#9CA3AF]"
-            >
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className="w-full rounded-lg border border-[#1F4641] bg-[#0A1F1C] px-4 py-2.5 text-[#F9FAFB] placeholder-[#6B7280] focus:border-emerald-500/50 focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
-              placeholder="ton@email.com"
-            />
+            <h1 className="text-xl font-bold text-[#F9FAFB]">Le 11 parfait</h1>
+            <p className="text-sm text-[#9CA3AF]">Ton meilleur 11, chaque journée</p>
           </div>
-          <div>
-            <label
-              htmlFor="password"
-              className="mb-1 block text-sm font-medium text-[#9CA3AF]"
-            >
-              Mot de passe
-            </label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="w-full rounded-lg border border-[#1F4641] bg-[#0A1F1C] px-4 py-2.5 text-[#F9FAFB] placeholder-[#6B7280] focus:border-emerald-500/50 focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
-              placeholder="••••••••"
-            />
+        </header>
+
+        {leagues === null ? (
+          <div className="space-y-3">
+            {[0, 1].map((i) => (
+              <div
+                key={i}
+                className="h-20 animate-pulse rounded-xl border border-[#1F4641] bg-[#0F2F2B]/50"
+              />
+            ))}
           </div>
-          {error && (
-            <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-400">
-              {error}
-            </p>
-          )}
-          <button
-            type="submit"
-            disabled={loading}
-            className="mt-2 rounded-lg bg-emerald-600 px-4 py-3 font-medium text-[#F9FAFB] transition hover:bg-emerald-500 disabled:opacity-50"
+        ) : leagues.length === 0 ? (
+          <EmptyState
+            icon="⚽"
+            title="Aucune ligue"
+            description="Crée ta première ligue, choisis ton championnat et compose ton effectif. L'app te proposera ton meilleur 11."
+          />
+        ) : (
+          <ul className="space-y-3">
+            {leagues.map((l) => {
+              const champ = getChampionshipById(l.championshipId);
+              return (
+                <li key={l.id}>
+                  <div className="flex items-stretch gap-2">
+                    <Link
+                      href={`/ligue/${l.id}`}
+                      className="flex-1 rounded-xl border border-[#1F4641] bg-[#0F2F2B] p-4 transition hover:border-emerald-500/50"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-[#F9FAFB]">{l.name}</span>
+                        <span className="text-sm text-[#9CA3AF]">
+                          {l.playerIds.length} joueur{l.playerIds.length > 1 ? "s" : ""}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-sm text-[#9CA3AF]">
+                        {champ?.name ?? "Championnat"}
+                      </p>
+                    </Link>
+                    <button
+                      onClick={() => handleDelete(l.id, l.name)}
+                      aria-label={`Supprimer ${l.name}`}
+                      className="rounded-xl border border-[#1F4641] bg-[#0F2F2B] px-3 text-[#9CA3AF] transition hover:border-red-500/50 hover:text-red-400"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      {/* Bouton flottant : créer une ligue */}
+      <div className="fixed inset-x-0 bottom-0 border-t border-[#1F4641] bg-[#0A1F1C]/95 p-4 backdrop-blur">
+        <div className="mx-auto max-w-md">
+          <Link
+            href="/creer"
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 font-medium text-[#F9FAFB] transition hover:bg-emerald-500"
           >
-            {loading ? "Connexion..." : "Se connecter"}
-          </button>
-        </form>
-        <p className="mt-4 text-center text-xs text-[#6B7280]">
-          Tes identifiants ne sont jamais stockés. Connexion directe à ta
-          plateforme.
-        </p>
+            <span className="text-lg leading-none">+</span> Créer une ligue
+          </Link>
+        </div>
       </div>
     </div>
   );
