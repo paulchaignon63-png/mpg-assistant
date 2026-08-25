@@ -1,12 +1,12 @@
 /**
  * Vivier des joueurs d'un championnat, pour composer un effectif à la main.
  *
- * Aucune authentification MPG : la liste vient de Sofascore (clubs + effectifs).
+ * Aucune authentification MPG : la liste vient de MPGStats (joignable depuis Vercel).
  * Le résultat est stable sur une saison, donc mis en cache par Next.js.
  */
 
 import { NextResponse } from "next/server";
-import { getChampionshipRoster } from "@/lib/sofascore-client";
+import { getChampionshipRoster } from "@/lib/mpgstats-client";
 import { getSupportedChampionships } from "@/lib/championships";
 
 // Cache côté serveur : le vivier ne change qu'aux mouvements de mercato.

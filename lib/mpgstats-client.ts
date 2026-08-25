@@ -166,3 +166,82 @@ function normalizeName(name: string): string {
     .replace(/\s+/g, " ")
     .trim();
 }
+
+/** Un joueur du vivier d'un championnat, pour composer un effectif à la main. */
+export interface RosterPlayer {
+  /** Identifiant MPGStats stable, clé de l'effectif manuel. */
+  id: string;
+  name: string;
+  club: string;
+  /** Poste normalisé : G, D, M, A. */
+  position: "G" | "D" | "M" | "A";
+}
+
+/** Poste détaillé MPGStats (DC, DL, MD, MO, A, G…) → convention interne. */
+function mapMpgStatsPosition(fp: string | undefined): "G" | "D" | "M" | "A" {
+  const p = (fp ?? "").toUpperCase();
+  if (p.startsWith("G")) return "G";
+  if (p.startsWith("D")) return "D";
+  if (p.startsWith("M")) return "M";
+  if (p.startsWith("A")) return "A";
+  return "M";
+}
+
+interface MpgStatsClub {
+  i?: number;
+  n?: string;
+  rn?: string;
+}
+
+interface MpgStatsRosterPlayer {
+  i?: number;
+  n?: string;
+  f?: string | null;
+  fp?: string;
+  c?: number;
+}
+
+/**
+ * Vivier complet d'un championnat (nom, club, poste par joueur) depuis MPGStats,
+ * en un seul appel. Fonctionne depuis Vercel (contrairement à Sofascore, bloqué
+ * en 403 sur les IP de datacenter). Le club provient de la table `c` du fichier,
+ * donc le filtre par club est fiable.
+ */
+export async function getChampionshipRoster(
+  championshipId: number | string
+): Promise<RosterPlayer[]> {
+  const slug = getLeagueSlug(championshipId);
+  const res = await fetch(`${MPGSTATS_URL}/leagues/${slug}_v2.json`);
+  if (!res.ok) return [];
+
+  const data = (await res.json()) as {
+    p?: MpgStatsRosterPlayer[];
+    c?: MpgStatsClub[];
+  };
+
+  const clubNameById = new Map<number, string>();
+  for (const club of data.c ?? []) {
+    if (club.i != null) clubNameById.set(club.i, club.n ?? club.rn ?? `Club ${club.i}`);
+  }
+
+  const roster: RosterPlayer[] = [];
+  for (const p of data.p ?? []) {
+    if (p.i == null) continue;
+    const last = (p.n ?? "").trim();
+    const first = (p.f ?? "").trim();
+    const name = [first, last].filter(Boolean).join(" ").trim();
+    if (!name) continue;
+    const club = p.c != null ? clubNameById.get(p.c) ?? "" : "";
+    roster.push({
+      id: `mpg_${p.i}`,
+      name,
+      club,
+      position: mapMpgStatsPosition(p.fp),
+    });
+  }
+
+  roster.sort(
+    (a, b) => a.club.localeCompare(b.club) || a.name.localeCompare(b.name)
+  );
+  return roster;
+}
