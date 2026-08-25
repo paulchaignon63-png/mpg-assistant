@@ -1,4 +1,4 @@
-/** Diagnostic temporaire : objet joueur brut MPGStats (quelles stats fines ?). À SUPPRIMER. */
+/** Diagnostic temporaire : clés des matchs MPGStats (passes déc / cartons par match ?). À SUPPRIMER. */
 import { NextResponse } from "next/server";
 
 const UA =
@@ -11,25 +11,32 @@ export async function GET() {
   const data = (await res.json()) as { p?: Array<Record<string, unknown>> };
   const players = data.p ?? [];
 
-  // Barcola (attaquant), Gradit (défenseur), Vitinha (milieu) — profils variés.
-  const wanted = new Set([10491, 2710, 7263]);
-  const found = players.filter((p) => wanted.has(p.i as number));
-
-  // Pour chacun : toutes les clés + contenu des objets d'agrégat + 1 match détaillé.
-  const dump = found.map((p) => {
-    const out: Record<string, unknown> = { i: p.i, n: p.n, fp: p.fp };
-    out.topKeys = Object.keys(p);
-    for (const k of ["s", "a", "sa", "la", "es", "esp"] as const) {
-      const v = p[k];
-      if (v && typeof v === "object") out[`${k}_keys`] = Object.keys(v as Record<string, unknown>);
-      out[`${k}`] = v;
+  // Union de TOUTES les clés rencontrées dans les objets-match, sur tout le championnat.
+  const matchKeyUnion = new Set<string>();
+  const examplesByKey: Record<string, unknown> = {};
+  for (const p of players) {
+    for (const m of (p.p as Array<Record<string, unknown>>) ?? []) {
+      for (const k of Object.keys(m)) {
+        matchKeyUnion.add(k);
+        if (!(k in examplesByKey)) examplesByKey[k] = m[k];
+      }
     }
-    const matches = (p.p as unknown[]) ?? [];
-    out.matchCount = matches.length;
-    out.matchSample = matches.slice(0, 2);
-    if (matches.length > 0) out.matchKeys = Object.keys(matches[0] as Record<string, unknown>);
-    return out;
-  });
+  }
 
-  return NextResponse.json({ dump }, { headers: { "Cache-Control": "no-store" } });
+  // Quelques matchs "riches" (avec le plus de clés) pour comprendre la structure.
+  const richMatches: Array<Record<string, unknown>> = [];
+  for (const p of players) {
+    for (const m of (p.p as Array<Record<string, unknown>>) ?? []) {
+      if (Object.keys(m).length >= 6) {
+        richMatches.push({ joueur: p.n, ...m });
+        if (richMatches.length >= 12) break;
+      }
+    }
+    if (richMatches.length >= 12) break;
+  }
+
+  return NextResponse.json(
+    { matchKeys: [...matchKeyUnion], examplesByKey, richMatches },
+    { headers: { "Cache-Control": "no-store" } }
+  );
 }
