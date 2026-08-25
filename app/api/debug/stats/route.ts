@@ -1,42 +1,25 @@
-/** Diagnostic temporaire : clés des matchs MPGStats (passes déc / cartons par match ?). À SUPPRIMER. */
+/** Diagnostic temporaire : stats fines rebranchées. À SUPPRIMER. */
 import { NextResponse } from "next/server";
+import { getChampionshipData } from "@/lib/mpgstats-client";
 
-const UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36";
+// Barcola, Vitinha, Gradit, Dembélé, Doué, un défenseur, un gardien.
+const IDS = ["mpg_10491", "mpg_7263", "mpg_2710", "mpg_1557", "mpg_11691", "mpg_1980", "mpg_6865"];
 
 export async function GET() {
-  const res = await fetch("https://backend.mpgstats.fr/leagues/Ligue-1_v2.json", {
-    headers: { "User-Agent": UA },
+  const { players, playedRounds } = await getChampionshipData("1");
+  const rows = IDS.map((id) => {
+    const p = players.get(id);
+    if (!p) return { id, found: false };
+    return {
+      nom: p.name,
+      poste: p.position,
+      club: p.club,
+      passes_dec: p.assists,
+      titularisation: p.pctTitularisations,
+      precision_passes: p.accuratePassPct,
+      buts: p.goals,
+      note_moy: p.average,
+    };
   });
-  const data = (await res.json()) as { p?: Array<Record<string, unknown>> };
-  const players = data.p ?? [];
-
-  // Union de TOUTES les clés rencontrées dans les objets-match, sur tout le championnat.
-  const matchKeyUnion = new Set<string>();
-  const examplesByKey: Record<string, unknown> = {};
-  for (const p of players) {
-    for (const m of (p.p as Array<Record<string, unknown>>) ?? []) {
-      for (const k of Object.keys(m)) {
-        matchKeyUnion.add(k);
-        if (!(k in examplesByKey)) examplesByKey[k] = m[k];
-      }
-    }
-  }
-
-  // Quelques matchs "riches" (avec le plus de clés) pour comprendre la structure.
-  const richMatches: Array<Record<string, unknown>> = [];
-  for (const p of players) {
-    for (const m of (p.p as Array<Record<string, unknown>>) ?? []) {
-      if (Object.keys(m).length >= 6) {
-        richMatches.push({ joueur: p.n, ...m });
-        if (richMatches.length >= 12) break;
-      }
-    }
-    if (richMatches.length >= 12) break;
-  }
-
-  return NextResponse.json(
-    { matchKeys: [...matchKeyUnion], examplesByKey, richMatches },
-    { headers: { "Cache-Control": "no-store" } }
-  );
+  return NextResponse.json({ playedRounds, joueurs: rows }, { headers: { "Cache-Control": "no-store" } });
 }
