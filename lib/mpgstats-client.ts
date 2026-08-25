@@ -323,6 +323,7 @@ export async function getChampionshipData(
     p?: MpgStatsFullRow[];
     c?: MpgStatsClub[];
     e?: MpgStatsEvent[];
+    mL?: { aS?: { i?: number; cD?: { lD?: number } } };
   };
 
   const clubNameById = new Map<number, string>();
@@ -330,13 +331,24 @@ export async function getChampionshipData(
     if (club.i != null) clubNameById.set(club.i, club.n ?? club.rn ?? `Club ${club.i}`);
   }
 
-  // Prochaine journée : événements à venir les plus proches (fenêtre de ~5 jours).
   const now = Math.floor(Date.now() / 1000);
-  const future = (data.e ?? [])
-    .filter((e) => e.dB != null && e.dB > now)
+
+  // Saison ACTIVE du championnat, donnée de façon fiable par MPGStats. Le
+  // calendrier (data.e) mélange plusieurs compétitions/saisons ; s'appuyer sur
+  // le « prochain événement » brut faisait pointer vers une autre compétition
+  // (ex. une coupe le 27/08 en s:53) au lieu de la Ligue 1 (s:55).
+  const currentSeason = data.mL?.aS?.i;
+
+  // Événements de la saison en cours uniquement.
+  const seasonEvents = (data.e ?? []).filter(
+    (e) => e.dB != null && (currentSeason == null || e.s === currentSeason)
+  );
+
+  // Prochaine journée de championnat (fenêtre ~5 jours pour couvrir un week-end).
+  const future = seasonEvents
+    .filter((e) => (e.dB ?? 0) > now)
     .sort((a, b) => (a.dB ?? 0) - (b.dB ?? 0));
   const nextKickoff = future[0]?.dB;
-  const currentSeason = future[0]?.s;
   const upcomingEventIds = new Set<number>();
   let nextMatchDate: Date | undefined;
   if (nextKickoff != null) {
@@ -347,17 +359,12 @@ export async function getChampionshipData(
     }
   }
 
-  // Journées déjà jouées de la SAISON EN COURS uniquement (le fichier contient
-  // aussi les saisons passées, dont les journées vont jusqu'à 34-38).
-  let playedRounds = 0;
-  for (const e of data.e ?? []) {
-    if (
-      e.dB != null &&
-      e.dB <= now &&
-      e.d != null &&
-      (currentSeason == null || e.s === currentSeason)
-    ) {
-      playedRounds = Math.max(playedRounds, e.d);
+  // Journées déjà jouées : la valeur officielle si disponible, sinon le plus
+  // grand numéro de journée passé de la saison en cours.
+  let playedRounds = data.mL?.aS?.cD?.lD ?? 0;
+  if (!playedRounds) {
+    for (const e of seasonEvents) {
+      if ((e.dB ?? 0) <= now && e.d != null) playedRounds = Math.max(playedRounds, e.d);
     }
   }
 

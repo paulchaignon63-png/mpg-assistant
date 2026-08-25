@@ -1,45 +1,47 @@
-/** Diagnostic temporaire : détection saison/journées. À SUPPRIMER. */
+/** Diagnostic temporaire : calcul du 11 + saison. À SUPPRIMER. */
 import { NextResponse } from "next/server";
+import { getChampionshipData } from "@/lib/mpgstats-client";
+import {
+  getRecommendedTeamWithSubstitutes,
+  getSuggestedCaptain,
+  type PoolPlayer,
+} from "@/lib/recommendation";
 
-const UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36";
+const IDS = [
+  "mpg_6865", "mpg_3805",
+  "mpg_1980", "mpg_44", "mpg_14225", "mpg_552", "mpg_2710",
+  "mpg_7263", "mpg_12844", "mpg_101", "mpg_398", "mpg_2286",
+  "mpg_1557", "mpg_10491", "mpg_601", "mpg_1210", "mpg_7411",
+  "mpg_6389", "mpg_6214", "mpg_5999", "mpg_2194",
+];
 
 export async function GET() {
-  const res = await fetch("https://backend.mpgstats.fr/leagues/Ligue-1_v2.json", {
-    headers: { "User-Agent": UA },
+  const { players, nextMatchDate, playedRounds } = await getChampionshipData("1");
+  const selected = IDS.map((id) => players.get(id)).filter((p): p is NonNullable<typeof p> => !!p);
+
+  const pool: PoolPlayer[] = selected.map((p) => ({
+    id: p.id, name: p.name, position: p.position, clubName: p.club,
+    average: p.average, matchs: p.matchs, goals: p.goals,
+    averageLast5: p.averageLast5, momentum: p.momentum,
+    last5Notes: p.last5Notes, last5Minutes: p.last5Minutes, last5OpponentRounds: p.last5OpponentRounds,
+    quotation: p.quotation,
+    isInjured: p.status === "injured", isSuspended: p.status === "suspended", isDoubtful: p.status === "doubtful",
+  }));
+  const squad: Record<string, unknown> = {};
+  for (const p of selected) squad[p.id] = { id: p.id };
+
+  const { recommended, substitutes, lofteurs } = getRecommendedTeamWithSubstitutes(squad, 343, pool, {
+    championshipDays: Math.max(1, playedRounds), totalTeams: 18, nextMatchDate,
   });
-  const data = (await res.json()) as {
-    e?: Array<{ i?: number; dB?: number; d?: number; s?: number }>;
-    mL?: { aS?: { i?: number; n?: string } };
-  };
-  const now = Math.floor(Date.now() / 1000);
-  const events = data.e ?? [];
-
-  const future = events.filter((e) => e.dB != null && e.dB > now).sort((a, b) => (a.dB ?? 0) - (b.dB ?? 0));
-  const past = events.filter((e) => e.dB != null && e.dB <= now);
-
-  // Répartition par saison sur les événements passés récents (90 derniers jours)
-  const recentCut = now - 90 * 24 * 60 * 60;
-  const recentPast = past.filter((e) => (e.dB ?? 0) >= recentCut);
-  const bySeasonRecent: Record<string, { count: number; maxRound: number; rounds: number[] }> = {};
-  for (const e of recentPast) {
-    const k = String(e.s);
-    if (!bySeasonRecent[k]) bySeasonRecent[k] = { count: 0, maxRound: 0, rounds: [] };
-    bySeasonRecent[k].count++;
-    if (e.d != null) {
-      bySeasonRecent[k].maxRound = Math.max(bySeasonRecent[k].maxRound, e.d);
-      if (!bySeasonRecent[k].rounds.includes(e.d)) bySeasonRecent[k].rounds.push(e.d);
-    }
-  }
+  const captain = getSuggestedCaptain(recommended);
 
   return NextResponse.json(
     {
-      now_iso: new Date(now * 1000).toISOString(),
-      activeSeason_mL: data.mL?.aS,
-      nextEvent: future[0] ? { dB: new Date((future[0].dB ?? 0) * 1000).toISOString(), d: future[0].d, s: future[0].s } : null,
-      next5: future.slice(0, 5).map((e) => ({ dB: new Date((e.dB ?? 0) * 1000).toISOString(), d: e.d, s: e.s })),
-      recentPast5: recentPast.slice(-8).map((e) => ({ dB: new Date((e.dB ?? 0) * 1000).toISOString(), d: e.d, s: e.s })),
-      bySeasonRecent,
+      nextMatchDate: nextMatchDate?.toISOString() ?? null,
+      playedRounds,
+      onze: recommended.map((p) => ({ n: p.name, pos: p.position, s: p.recommendationScore })),
+      capitaine: captain?.name,
+      indispo: lofteurs.filter((p) => p.recommendationScore === 0).map((p) => `${p.name} (${p.scoreZeroReason})`),
     },
     { headers: { "Cache-Control": "no-store" } }
   );
