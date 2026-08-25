@@ -8,6 +8,7 @@
 
 import { NextResponse } from "next/server";
 import { getChampionshipData } from "@/lib/mpgstats-client";
+import { getSeasonAssists, normalizeAssistKey } from "@/lib/espn-stats";
 import {
   getRecommendedTeamWithSubstitutes,
   getSuggestedCaptain,
@@ -33,7 +34,14 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { players, nextMatchDate, playedRounds, totalTeams } = await getChampionshipData(championshipId);
+    const [{ players, nextMatchDate, playedRounds, totalTeams }, assistsByName] =
+      await Promise.all([
+        getChampionshipData(championshipId),
+        // Année de saison : approx. via l'année courante (corrigée juste après).
+        getSeasonAssists(championshipId, new Date().getUTCFullYear()).catch(
+          () => new Map<string, number>()
+        ),
+      ]);
     if (players.size === 0) {
       return NextResponse.json({ error: "Données du championnat indisponibles" }, { status: 502 });
     }
@@ -61,6 +69,7 @@ export async function POST(request: Request) {
       last5Minutes: p.last5Minutes,
       last5OpponentRounds: p.last5OpponentRounds,
       quotation: p.quotation,
+      assists: assistsByName.get(normalizeAssistKey(p.name)),
       pctTitularisations: p.pctTitularisations,
       accuratePassPct: p.accuratePassPct,
       nextOpponentRank: p.nextOpponentRank,
