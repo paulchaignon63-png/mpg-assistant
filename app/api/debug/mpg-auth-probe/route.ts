@@ -16,6 +16,7 @@
 import { NextResponse } from "next/server";
 
 const MPG_WEB_URL = "https://mpg.football";
+const MPG_API_URL = "https://api.mpg.football";
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
@@ -54,7 +55,7 @@ async function probe(
       contentType: res.headers.get("content-type"),
       remixRedirect: res.headers.get("x-remix-redirect"),
       location: res.headers.get("location"),
-      bodyStart: text.slice(0, 180).replace(/\s+/g, " ").trim(),
+      bodyStart: text.slice(0, 400).replace(/\s+/g, " ").trim(),
     };
   } catch (err) {
     return {
@@ -128,6 +129,31 @@ export async function GET() {
         body: form.toString(),
       }
     ),
+    // 7. L'API répond-elle ? C'est elle que l'app utilise pour toutes les données.
+    probe("7-api-racine", `${MPG_API_URL}/`, {
+      method: "GET",
+      headers: { "User-Agent": BROWSER_UA },
+    }),
+    // 8. LE point clé : que dit vraiment le 403 de /user/sign-in ?
+    //    Le code bascule sur l'OIDC dès qu'il voit 403 sans lire la réponse.
+    probe("8-api-sign-in", `${MPG_API_URL}/user/sign-in`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "User-Agent": BROWSER_UA,
+        Accept: "application/json",
+        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+        Origin: MPG_WEB_URL,
+        Referer: `${MPG_WEB_URL}/`,
+      },
+      body: JSON.stringify({ login: FAKE.email, password: FAKE.password, language: "fr-FR" }),
+    }),
+    // 9. Même appel dépouillé, pour voir si les en-têtes changent la réponse
+    probe("9-api-sign-in-nu", `${MPG_API_URL}/user/sign-in`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login: FAKE.email, password: FAKE.password, language: "fr-FR" }),
+    }),
   ]);
 
   return NextResponse.json(
