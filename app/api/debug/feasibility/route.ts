@@ -1,43 +1,51 @@
-/** Diagnostic temporaire : autres sources de passes décisives. À SUPPRIMER. */
+/** Diagnostic temporaire : structure ESPN core API (passes déc). À SUPPRIMER. */
 import { NextResponse } from "next/server";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36";
+const BASE = "https://sports.core.api.espn.com/v2/sports/soccer/leagues/fra.1";
 
-async function probe(label: string, url: string, look: string[]) {
-  try {
-    const res = await fetch(url, {
-      headers: { "User-Agent": UA, "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8" },
-    });
-    const text = await res.text();
-    const found: Record<string, boolean> = {};
-    for (const n of look) found[n] = text.toLowerCase().includes(n.toLowerCase());
-    return {
-      label,
-      status: res.status,
-      server: res.headers.get("server"),
-      taille: text.length,
-      liensJoueurs: (text.match(/spieler|player|joueur|athlete/gi) ?? []).length,
-      contient: found,
-      debut: text.slice(0, 120).replace(/\s+/g, " "),
-    };
-  } catch (e) {
-    return { label, url, erreur: String(e) };
-  }
+async function j(url: string) {
+  const res = await fetch(url, { headers: { "User-Agent": UA } });
+  return res.ok ? res.json() : null;
 }
 
 export async function GET() {
-  const results = await Promise.all([
-    // worldfootball.net : tableau "passes décisives" tout fait (une page, tous les joueurs)
-    probe("worldfootball-assists", "https://www.worldfootball.net/assists/fra-ligue-1-2025-2026/", ["assist", "Passes", "spieler"]),
-    // ESPN API JSON : leaders de la saison (dont assists)
-    probe("espn-leaders", "https://sports.core.api.espn.com/v2/sports/soccer/leagues/fra.1/seasons/2025/types/1/leaders?lang=fr", ["assist", "totalAssists", "leaders"]),
-    // ESPN site API : simple reachability
-    probe("espn-scoreboard", "https://site.api.espn.com/apis/site/v2/sports/soccer/fra.1/scoreboard", ["events", "competitions"]),
-    // L'Équipe : page stats joueurs
-    probe("lequipe", "https://www.lequipe.fr/Football/ligue-1/page-statistiques/passes-decisives", ["passes", "décisive", "assist"]),
-    // Ligue1 officiel
-    probe("ligue1", "https://www.ligue1.fr/", ["ligue1", "stats", "player"]),
-  ]);
-  return NextResponse.json({ results }, { headers: { "Cache-Control": "no-store" } });
+  const out: Record<string, unknown> = {};
+
+  // 1) Leaders de la saison 2025 : catégories dispo + volume
+  const leaders = (await j(`${BASE}/seasons/2025/types/1/leaders?lang=fr`)) as {
+    categories?: Array<{ name?: string; displayName?: string; leaders?: Array<{ value?: number; athlete?: { $ref?: string } }> }>;
+  } | null;
+  if (leaders?.categories) {
+    out.categories = leaders.categories.map((c) => ({
+      name: c.name,
+      displayName: c.displayName,
+      nbLeaders: c.leaders?.length ?? 0,
+    }));
+    const assistCat = leaders.categories.find((c) => /assist/i.test(c.name ?? "") || /assist|passe/i.test(c.displayName ?? ""));
+    if (assistCat?.leaders?.length) {
+      // Résoudre les 3 premiers passeurs (nom via $ref athlete)
+      const top = assistCat.leaders.slice(0, 3);
+      const resolved = [];
+      for (const l of top) {
+        let nom = "?";
+        if (l.athlete?.$ref) {
+          const a = (await j(l.athlete.$ref)) as { displayName?: string; fullName?: string } | null;
+          nom = a?.displayName ?? a?.fullName ?? "?";
+        }
+        resolved.push({ nom, passes_dec: l.value });
+      }
+      out.top_passeurs = resolved;
+      out.nb_passeurs_total = assistCat.leaders.length;
+    }
+  } else {
+    out.leaders_brut = leaders;
+  }
+
+  // 2) Endpoint alternatif : statistiques de saison par équipe (couverture complète ?)
+  const teams = (await j(`${BASE}/seasons/2025/teams?lang=fr&limit=50`)) as { count?: number; items?: unknown[] } | null;
+  out.nbEquipes = teams?.count ?? teams?.items?.length ?? null;
+
+  return NextResponse.json(out, { headers: { "Cache-Control": "no-store" } });
 }
