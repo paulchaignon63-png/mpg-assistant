@@ -6,31 +6,25 @@ export const maxDuration = 60;
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
-async function probe(label: string, url: string) {
+async function probe(label: string, url: string, slice = 600) {
   try {
     const r = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json" }, cache: "no-store" });
     const text = await r.text();
-    let shape = "";
-    try {
-      const j = JSON.parse(text);
-      shape = JSON.stringify(j).slice(0, 700);
-    } catch {
-      shape = text.slice(0, 200);
-    }
-    return { label, url, status: r.status, len: text.length, shape };
+    return { label, status: r.status, len: text.length, shape: text.slice(0, slice) };
   } catch (e) {
-    return { label, url, status: "ERR", error: String(e).slice(0, 200) };
+    return { label, status: "ERR", error: String(e).slice(0, 150) };
   }
 }
 
 export async function GET() {
+  const C = "https://sports.core.api.espn.com/v2/sports/soccer/leagues";
   const out = await Promise.all([
-    probe("core-ucl-seasons", "https://sports.core.api.espn.com/v2/sports/soccer/leagues/uefa.champions/seasons/2026/types/1/events?limit=5"),
-    probe("core-ucl-calendar", "https://sports.core.api.espn.com/v2/sports/soccer/leagues/uefa.champions/seasons/2026/types/1"),
-    probe("site-ucl-scoreboard", "https://site.api.espn.com/apis/site/v2/sports/soccer/uefa.champions/scoreboard?dates=20260916"),
-    probe("site-fra1-teams", "https://site.api.espn.com/apis/site/v2/sports/soccer/fra.1/teams"),
-    probe("site-team-sched", "https://site.api.espn.com/apis/site/v2/sports/soccer/fra.1/teams/160/schedule"),
-    probe("core-uel-events", "https://sports.core.api.espn.com/v2/sports/soccer/leagues/uefa.europa/seasons/2026/types/1/events?limit=5"),
+    probe("ucl-seasons-list", `${C}/uefa.champions/seasons?limit=4`),
+    probe("ucl-2027-t1", `${C}/uefa.champions/seasons/2027/types/1/events?limit=3`),
+    probe("ucl-2026-root", `${C}/uefa.champions/seasons/2026`, 900),
+    probe("ucl-allevents", `${C}/uefa.champions/events?limit=3`),
+    probe("ucl-2026-t2", `${C}/uefa.champions/seasons/2026/types/2/events?limit=3`),
+    probe("fra1-2026-events", `${C}/fra.1/seasons/2026/types/1/events?limit=3`),
   ]);
   return NextResponse.json({ probes: out });
 }
