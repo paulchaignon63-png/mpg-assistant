@@ -55,16 +55,40 @@ export interface EuroFixture {
 }
 
 /**
- * Mots à retirer pour comparer des noms de clubs venant de sources différentes
- * (« Olympique Lyonnais » côté ESPN vs « Lyon » côté MPGStats).
+ * Mots trop courants pour identifier un club : ils sont ignorés lors de la
+ * comparaison (« Olympique Lyonnais » et « Lyon » doivent se rapprocher).
  */
 const CLUB_NOISE = new Set([
   "fc", "ac", "as", "sc", "sv", "cf", "cd", "rc", "ss", "ssc", "afc", "bsc",
   "club", "clube", "de", "del", "di", "du", "des", "la", "le", "les", "los",
-  "olympique", "stade", "sporting", "real", "athletic", "atletico", "united",
-  "city", "calcio", "futbol", "football", "association", "sportiv", "sportive",
+  "calcio", "futbol", "football", "association", "sportiv", "sportive",
   "1", "04", "05", "07", "08", "09", "1899", "1900",
 ]);
+
+/**
+ * Mots qui, eux, DISTINGUENT deux clubs d'une même ville : « Real » Madrid vs
+ * « Atlético » Madrid, Manchester « United » vs « City ». Ils ne suffisent pas
+ * à identifier un club, mais si les deux noms en portent et qu'ils diffèrent,
+ * il s'agit forcément de clubs différents.
+ */
+const CLUB_QUALIFIERS = new Set([
+  "real", "atletico", "athletic", "united", "city", "sporting", "olympique",
+  "stade", "racing", "inter", "milan", "roma", "lazio", "borussia", "bayer",
+  "bayern", "union", "west", "east", "nord", "sud",
+]);
+
+/**
+ * Clubs que les deux sources nomment de façon irréconciliable par jetons, et
+ * dont un rapprochement naïf produirait un faux positif grave.
+ * « Paris » (PSG côté MPGStats) et « Paris FC » sont deux clubs de Ligue 1.
+ */
+const CLUB_ALIASES: Record<string, string> = {
+  "paris": "psg",
+  "paris saint germain": "psg",
+  "paris sg": "psg",
+  "psg": "psg",
+  "paris fc": "paris-fc",
+};
 
 function normalizeClub(name: string): string {
   return name
@@ -75,20 +99,44 @@ function normalizeClub(name: string): string {
     .trim();
 }
 
+/** Identité canonique d'un club ambigu, sinon null. */
+function canonicalClub(name: string): string | null {
+  return CLUB_ALIASES[normalizeClub(name)] ?? null;
+}
+
 /** Jetons distinctifs d'un nom de club (« olympique lyonnais » → ["lyonnais"]). */
 function clubTokens(name: string): string[] {
   return normalizeClub(name)
     .split(" ")
-    .filter((t) => t.length >= 3 && !CLUB_NOISE.has(t));
+    .filter((t) => t.length >= 3 && !CLUB_NOISE.has(t) && !CLUB_QUALIFIERS.has(t));
+}
+
+function clubQualifiers(name: string): Set<string> {
+  return new Set(normalizeClub(name).split(" ").filter((t) => CLUB_QUALIFIERS.has(t)));
 }
 
 /**
- * Deux noms désignent-ils le même club ? On exige un jeton distinctif commun,
- * ou qu'un jeton soit préfixe de l'autre (« lyon » / « lyonnais »,
- * « marseille » / « marseillais »). Le préfixe est plafonné à 4 caractères
- * minimum pour éviter les rapprochements hasardeux.
+ * Deux noms désignent-ils le même club ?
+ *
+ * 1. Si l'un des deux est un cas ambigu répertorié, l'identité canonique
+ *    tranche seule (évite « Paris FC » ↔ « Paris Saint-Germain »).
+ * 2. Sinon on exige un jeton distinctif commun (ou un préfixe d'au moins
+ *    4 caractères : « lyon » / « lyonnais »)…
+ * 3. …et l'absence de qualificatifs contradictoires, sans quoi « Real Madrid »
+ *    et « Atlético Madrid » se confondraient.
  */
 export function clubsMatch(a: string, b: string): boolean {
+  const ca = canonicalClub(a);
+  const cb = canonicalClub(b);
+  if (ca || cb) return ca != null && cb != null && ca === cb;
+
+  const qa = clubQualifiers(a);
+  const qb = clubQualifiers(b);
+  if (qa.size > 0 && qb.size > 0) {
+    const shared = [...qa].some((q) => qb.has(q));
+    if (!shared) return false;
+  }
+
   const ta = clubTokens(a);
   const tb = clubTokens(b);
   if (ta.length === 0 || tb.length === 0) return false;
