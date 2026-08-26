@@ -423,13 +423,18 @@ export async function getChampionshipData(
     if (!nextOppByClub.has(e.t2)) nextOppByClub.set(e.t2, { oppId: e.t1, isHome: false });
   }
 
-  // --- Matchs hors championnat autour de la journée -----------------------
-  // Le calendrier MPGStats mélange les compétitions : tout événement d'une
-  // autre « saison » que le championnat en cours est un match de coupe (Europe
-  // ou coupe nationale). Un club qui joue en semaine juste avant la journée
-  // fait tourner (fatigue) ; juste après, l'entraîneur ménage souvent ses
-  // cadres. C'est le signal « il joue la Ligue des champions » sans avoir
-  // besoin d'une source externe.
+  // --- Autres matchs du club autour de la journée --------------------------
+  // Détecte qu'un club dispute un autre match juste avant/après la journée :
+  // avant, il arrive fatigué et fait tourner ; après, l'entraîneur ménage ses
+  // cadres.
+  //
+  // ATTENTION — portée réelle : le fichier MPGStats regroupe plusieurs
+  // CHAMPIONNATS (L1, L2, Liga, Premier League, Serie A), et non des coupes.
+  // Il ne contient ni Ligue des champions ni coupes nationales. Un club
+  // n'apparaissant que dans son propre championnat, ce test ne se déclenche
+  // aujourd'hui jamais : il est prêt si MPGStats ajoute un jour les coupes,
+  // mais la détection « joue la Ligue des champions » demande une autre
+  // source (cf. ESPN, dont le calendrier 2026-27 n'est pas encore publié).
   const MIDWEEK_BEFORE_DAYS = 4;
   const MIDWEEK_AFTER_DAYS = 3;
   const midweekBeforeClubs = new Set<number>();
