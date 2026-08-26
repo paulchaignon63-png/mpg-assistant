@@ -41,6 +41,12 @@ export interface TacticalSub {
 
 /** Écart de note minimal (sur 10) pour proposer une alternative « pure note ». */
 const ALT_MIN_DELTA = 0.6;
+/**
+ * Écart de note maximal (remplaçant en dessous) toléré pour un « coup de poker »
+ * match-piège : on accepte de proposer un joueur un peu moins bien noté si son
+ * match est nettement plus favorable que celui du titulaire.
+ */
+const MATCH_PIEGE_MARGIN = 0.8;
 /** En dessous, un titulaire est jugé « rotation » dans son club (risque de ne pas jouer). */
 const ROTATION_TITU_THRESHOLD = 0.55;
 /** Nombre maximum de suggestions affichées. */
@@ -77,6 +83,51 @@ function altReason(s: SubCandidate, b: SubCandidate, totalTeams: number): string
     return `${bo} est sur une meilleure dynamique que ${so}.`;
   }
   return `Sur ce match, ${bo} a une meilleure note estimée que ${so}.`;
+}
+
+/** Décrit brièvement le match d'un joueur (« un gros adversaire à l'extérieur »). */
+function describeFixture(p: SubCandidate, totalTeams: number): string {
+  const N = totalTeams || 18;
+  const bits: string[] = [];
+  if (p.nextOpponentRank != null) {
+    if (p.nextOpponentRank <= 5) bits.push("un gros adversaire");
+    else if (p.nextOpponentRank >= N - 4) bits.push("une équipe faible");
+  }
+  if (p.isHome === true) bits.push("à domicile");
+  else if (p.isHome === false) bits.push("à l'extérieur");
+  return bits.join(" ");
+}
+
+/**
+ * « Match piège » : le titulaire a un match difficile et le remplaçant un match
+ * nettement plus favorable, même si sa note est légèrement en dessous. C'est le
+ * coup de poker classique de MPG que la comparaison de notes brute masque
+ * (la note intègre déjà l'adversaire, donc un bon joueur en match dur reste
+ * souvent au-dessus d'un joueur correct en match facile).
+ */
+function isMatchPiege(s: SubCandidate, b: SubCandidate, totalTeams: number): boolean {
+  const N = totalTeams || 18;
+  const starterHard =
+    (s.nextOpponentRank != null && s.nextOpponentRank <= 5) || s.isHome === false;
+  const benchEasy =
+    (b.nextOpponentRank != null && b.nextOpponentRank >= N - 4) || b.isHome === true;
+  if (!starterHard || !benchEasy) return false;
+  // Exige un vrai écart de difficulté d'adversaire (pas seulement dom./ext.).
+  if (s.nextOpponentRank != null && b.nextOpponentRank != null) {
+    return b.nextOpponentRank - s.nextOpponentRank >= 6;
+  }
+  // Sans rang d'adversaire des deux côtés : exige le combo extérieur → domicile.
+  return s.isHome === false && b.isHome === true;
+}
+
+function matchPiegeReason(s: SubCandidate, b: SubCandidate, totalTeams: number): string {
+  const so = surname(s.name);
+  const bo = surname(b.name);
+  const sFix = describeFixture(s, totalTeams);
+  const bFix = describeFixture(b, totalTeams);
+  const sDesc = sFix ? ` (${sFix})` : "";
+  const bDesc = bFix ? ` (${bFix})` : "";
+  return `Coup de poker : ${so} a un match difficile${sDesc}, ${bo} un match bien plus favorable${bDesc}.`;
 }
 
 /**
@@ -129,8 +180,7 @@ export function buildTacticalSubs(
       };
     }
 
-    // Alternative : un banc nettement meilleur pour ce match précis.
-    // Prend le pas si l'écart est vraiment marqué, sinon complète.
+    // Alternative « pure note » : un banc nettement meilleur pour ce match précis.
     if (delta >= ALT_MIN_DELTA) {
       const altPriority = 40 + delta * 12;
       if (!chosen || altPriority > chosen.priority) {
@@ -140,6 +190,19 @@ export function buildTacticalSubs(
           out: pick(s),
           in: pick(best),
           priority: altPriority,
+        };
+      }
+    } else if (delta >= -MATCH_PIEGE_MARGIN && isMatchPiege(s, best, totalTeams)) {
+      // Alternative « match piège » : le remplaçant est un peu en dessous mais
+      // a un match bien plus favorable → coup de poker à considérer.
+      const mpPriority = 45;
+      if (!chosen || mpPriority > chosen.priority) {
+        chosen = {
+          kind: "alternative",
+          reason: matchPiegeReason(s, best, totalTeams),
+          out: pick(s),
+          in: pick(best),
+          priority: mpPriority,
         };
       }
     }
