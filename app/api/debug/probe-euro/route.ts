@@ -16,18 +16,26 @@ export async function GET() {
       cache: "no-store",
     });
     const j = await r.json();
-    const events = j?.data?.e ?? [];
+    const events = j?.e ?? [];
     const bySeason: Record<string, { n: number; sample: unknown[] }> = {};
     for (const e of events) {
       const k = String(e.s ?? "?");
       bySeason[k] ??= { n: 0, sample: [] };
       bySeason[k].n++;
       if (bySeason[k].sample.length < 2)
-        bySeason[k].sample.push({ t1: e.t1, t2: e.t2, dB: e.dB, d: e.d });
+        bySeason[k].sample.push({
+          t1: e.t1,
+          t2: e.t2,
+          d: e.d,
+          date: e.dB ? new Date(e.dB * 1000).toISOString().slice(0, 16) : null,
+        });
     }
+    const clubs: Record<number, string> = {};
+    for (const c of j?.c ?? []) if (c?.i != null) clubs[c.i] = c.n ?? c.rn ?? "?";
     out.mpgstats = {
-      activeSeason: j?.data?.mL?.aS?.i,
-      lastRound: j?.data?.mL?.aS?.cD?.lD,
+      activeSeason: j?.mL?.aS?.i,
+      lastRound: j?.mL?.aS?.cD?.lD,
+      clubCount: Object.keys(clubs).length,
       totalEvents: events.length,
       bySeason,
     };
