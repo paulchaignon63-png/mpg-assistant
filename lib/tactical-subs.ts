@@ -33,6 +33,10 @@ export interface SubCandidate {
   momentum?: number;
   /** Minutes jouées lors des 5 derniers matchs (0 = pas entré). */
   last5Minutes?: number[];
+  /** Le club joue une coupe (Europe/coupe nationale) juste avant la journée. */
+  midweekBefore?: boolean;
+  /** Le club joue une coupe juste après la journée. */
+  midweekAfter?: boolean;
 }
 
 export interface TacticalSub {
@@ -62,6 +66,8 @@ const EARLY_SUB_MINUTES = 66;
 const FULL_GAME_MINUTES = 80;
 /** Écart de note maximal toléré pour proposer un joueur au temps de jeu supérieur. */
 const MINUTES_MARGIN = 0.7;
+/** Écart de note maximal toléré pour proposer un joueur dont le club ne joue pas de coupe. */
+const CONGESTION_MARGIN = 0.7;
 /** Nombre maximum de suggestions affichées. */
 const MAX_SUBS = 5;
 
@@ -165,6 +171,20 @@ function isEarlySubRisk(s: SubCandidate, b: SubCandidate): boolean {
 }
 
 /**
+ * « Turnover coupe » : le club du titulaire enchaîne avec une coupe d'Europe ou
+ * une coupe nationale autour de la journée, pas celui du remplaçant. Avant, le
+ * joueur arrive fatigué ; après, l'entraîneur ménage souvent ses cadres. C'est
+ * la finesse qu'un habitué de MPG applique et qu'un débutant ignore.
+ */
+function congestionEdge(s: SubCandidate, b: SubCandidate): "before" | "after" | null {
+  const benchFree = !b.midweekBefore && !b.midweekAfter;
+  if (!benchFree) return null;
+  if (s.midweekBefore) return "before";
+  if (s.midweekAfter) return "after";
+  return null;
+}
+
+/**
  * Construit les remplacements tactiques suggérés à partir des titulaires et du banc.
  * `bench` = remplaçants recommandés (tous postes confondus).
  */
@@ -223,6 +243,24 @@ export function buildTacticalSubs(
         `${surname(s.name)} est souvent remplacé en cours de match (${sm} min en moyenne), ${surname(best.name)} va au bout.`,
         50
       );
+    }
+
+    // Sécurité « coupe » : le club du titulaire a un match de coupe accolé.
+    if (delta >= -CONGESTION_MARGIN) {
+      const edge = congestionEdge(s, best);
+      if (edge === "before") {
+        consider(
+          "securite",
+          `${s.clubName ?? "Son club"} joue une coupe juste avant : ${surname(s.name)} peut être ménagé ou fatigué, pas ${surname(best.name)}.`,
+          70
+        );
+      } else if (edge === "after") {
+        consider(
+          "securite",
+          `${s.clubName ?? "Son club"} enchaîne sur une coupe juste après : risque que ${surname(s.name)} soit ménagé, pas ${surname(best.name)}.`,
+          65
+        );
+      }
     }
 
     // Alternative « pure note » : un banc nettement meilleur pour ce match précis.

@@ -271,6 +271,12 @@ export interface MpgStatsFullPlayer extends RosterPlayer {
   teamRank?: number;
   /** Pour l'affichage. */
   nextOpponentName?: string;
+  /**
+   * Le club dispute un autre match (coupe d'Europe, coupe nationale) dans les
+   * jours qui entourent la journée de championnat → risque de turnover.
+   */
+  midweekBefore?: boolean;
+  midweekAfter?: boolean;
 }
 
 /** Résultat complet d'un championnat : joueurs enrichis + date du prochain match. */
@@ -417,12 +423,41 @@ export async function getChampionshipData(
     if (!nextOppByClub.has(e.t2)) nextOppByClub.set(e.t2, { oppId: e.t1, isHome: false });
   }
 
+  // --- Matchs hors championnat autour de la journée -----------------------
+  // Le calendrier MPGStats mélange les compétitions : tout événement d'une
+  // autre « saison » que le championnat en cours est un match de coupe (Europe
+  // ou coupe nationale). Un club qui joue en semaine juste avant la journée
+  // fait tourner (fatigue) ; juste après, l'entraîneur ménage souvent ses
+  // cadres. C'est le signal « il joue la Ligue des champions » sans avoir
+  // besoin d'une source externe.
+  const MIDWEEK_BEFORE_DAYS = 4;
+  const MIDWEEK_AFTER_DAYS = 3;
+  const midweekBeforeClubs = new Set<number>();
+  const midweekAfterClubs = new Set<number>();
+  if (nextKickoff != null) {
+    const beforeFrom = nextKickoff - MIDWEEK_BEFORE_DAYS * 86400;
+    const afterTo = nextKickoff + MIDWEEK_AFTER_DAYS * 86400;
+    for (const e of data.e ?? []) {
+      if (e.dB == null || e.t1 == null || e.t2 == null) continue;
+      if (currentSeason != null && e.s === currentSeason) continue; // match de championnat
+      if (e.dB >= beforeFrom && e.dB < nextKickoff) {
+        midweekBeforeClubs.add(e.t1);
+        midweekBeforeClubs.add(e.t2);
+      } else if (e.dB > nextKickoff && e.dB <= afterTo) {
+        midweekAfterClubs.add(e.t1);
+        midweekAfterClubs.add(e.t2);
+      }
+    }
+  }
+
   function contextForClub(clubId: number | undefined) {
     if (clubId == null) return undefined;
     const next = nextOppByClub.get(clubId);
     const club = clubById.get(clubId);
     const teamFormWinsLast5 = club?.s?.w != null ? Math.min(5, club.s.w) : undefined;
-    if (!next) return { teamFormWinsLast5 };
+    const midweekBefore = midweekBeforeClubs.has(clubId) || undefined;
+    const midweekAfter = midweekAfterClubs.has(clubId) || undefined;
+    if (!next) return { teamFormWinsLast5, midweekBefore, midweekAfter };
     const opp = clubById.get(next.oppId);
     // Les buts pour/contre ne sont volontairement pas transmis : les seuils du
     // moteur sont calibrés sur des totaux de fin de saison et s'emballent sur
@@ -433,6 +468,8 @@ export async function getChampionshipData(
       isHome: next.isHome,
       teamFormWinsLast5,
       nextOpponentName: opp?.n ?? opp?.rn,
+      midweekBefore,
+      midweekAfter,
     };
   }
 
@@ -497,6 +534,8 @@ export async function getChampionshipData(
       teamFormWinsLast5: ctx?.teamFormWinsLast5,
       teamRank,
       nextOpponentName: ctx?.nextOpponentName,
+      midweekBefore: ctx?.midweekBefore,
+      midweekAfter: ctx?.midweekAfter,
     });
   }
 
