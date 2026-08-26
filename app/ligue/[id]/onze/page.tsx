@@ -23,6 +23,19 @@ interface ResultPlayer {
   isHome?: boolean;
   reasons?: Reason[];
 }
+interface SubEndpoint {
+  id: string;
+  name?: string;
+  clubName?: string;
+  position: "G" | "D" | "M" | "A";
+  score: number;
+}
+interface TacticalSub {
+  kind: "securite" | "alternative";
+  reason: string;
+  out: SubEndpoint;
+  in: SubEndpoint;
+}
 interface OnzeResult {
   formation: number;
   nextMatchDate: string | null;
@@ -30,6 +43,7 @@ interface OnzeResult {
   substitutes: Record<"G" | "D" | "M" | "A", ResultPlayer[]>;
   lofteurs: ResultPlayer[];
   suggestedCaptainId: string | null;
+  tacticalSubs?: TacticalSub[];
 }
 
 const POS_ORDER: Array<"G" | "D" | "M" | "A"> = ["G", "D", "M", "A"];
@@ -66,6 +80,7 @@ export default function OnzePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<ResultPlayer | null>(null);
+  const [openSub, setOpenSub] = useState<number | null>(null);
 
   useEffect(() => {
     const lg = getLeague(leagueId);
@@ -210,6 +225,82 @@ export default function OnzePage() {
               Touche un joueur pour voir <span className="text-[#9CA3AF]">notre note</span> et
               pourquoi.
             </p>
+
+            {result.tacticalSubs && result.tacticalSubs.length > 0 && (
+              <div className="mt-6">
+                <h2 className="mb-1 text-sm font-bold text-[#F9FAFB]">
+                  Remplacements tactiques
+                </h2>
+                <p className="mb-3 text-xs text-[#6B7280]">
+                  Des suggestions, pas des obligations. Touche « ? » pour le pourquoi.
+                </p>
+                <div className="space-y-2">
+                  {result.tacticalSubs.map((s, i) => (
+                    <div
+                      key={`${s.out.id}-${s.in.id}`}
+                      className="rounded-xl border border-[#1F4641] bg-[#0F2F2B] p-3"
+                    >
+                      <div className="flex items-center gap-2">
+                        {/* Sortant */}
+                        <div className="flex min-w-0 flex-1 items-center gap-2">
+                          <Jersey club={s.out.clubName} size={30} />
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium text-[#F9FAFB]">
+                              {surname(s.out.name)}
+                            </div>
+                            <div className="text-[10px] text-[#6B7280]">
+                              {s.out.score.toFixed(1)}
+                            </div>
+                          </div>
+                        </div>
+
+                        <span className="shrink-0 text-emerald-400">→</span>
+
+                        {/* Entrant */}
+                        <div className="flex min-w-0 flex-1 items-center gap-2">
+                          <Jersey club={s.in.clubName} size={30} />
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium text-[#F9FAFB]">
+                              {surname(s.in.name)}
+                            </div>
+                            <div className="text-[10px] text-[#6B7280]">
+                              {s.in.score.toFixed(1)}
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => setOpenSub(openSub === i ? null : i)}
+                          aria-label="Pourquoi cette suggestion"
+                          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold transition ${
+                            openSub === i
+                              ? "bg-emerald-500 text-[#04120E]"
+                              : "bg-[#1F4641] text-[#9CA3AF]"
+                          }`}
+                        >
+                          ?
+                        </button>
+                      </div>
+
+                      {openSub === i && (
+                        <div className="mt-3 border-t border-[#1F4641] pt-3">
+                          <span
+                            className={`mr-2 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                              s.kind === "securite"
+                                ? "bg-amber-400/15 text-amber-300"
+                                : "bg-sky-400/15 text-sky-300"
+                            }`}
+                          >
+                            {s.kind === "securite" ? "Sécurité" : "Alternative"}
+                          </span>
+                          <span className="text-sm text-[#F9FAFB]">{s.reason}</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {(["G", "D", "M", "A"] as const).some((k) => (result.substitutes[k] ?? []).length > 0) && (
               <div className="mt-6">

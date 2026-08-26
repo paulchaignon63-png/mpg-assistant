@@ -10,6 +10,7 @@ import { NextResponse } from "next/server";
 import { getChampionshipData } from "@/lib/mpgstats-client";
 import { getSeasonAssists, normalizeAssistKey } from "@/lib/espn-stats";
 import { buildReasons } from "@/lib/reasons";
+import { buildTacticalSubs, type SubCandidate } from "@/lib/tactical-subs";
 import {
   getRecommendedTeamWithSubstitutes,
   getSuggestedCaptain,
@@ -101,6 +102,38 @@ export async function POST(request: Request) {
     // Raison d'indisponibilité (blessé/suspendu) pour l'affichage.
     const statusById = new Map(selected.map((p) => [p.id, p]));
     const statusByName = new Map(selected.map((p) => [p.name, p]));
+
+    // Remplacements tactiques : titulaires vs banc, sur plusieurs critères.
+    const toCandidate = (p: {
+      id?: string;
+      name?: string;
+      position?: "G" | "D" | "M" | "A";
+      clubName?: string;
+      recommendationScore: number;
+    }): SubCandidate => {
+      const s =
+        (p.id ? statusById.get(p.id) : undefined) ??
+        (p.name ? statusByName.get(p.name) : undefined);
+      return {
+        id: p.id,
+        name: p.name,
+        position: (p.position ?? s?.position ?? "M") as "G" | "D" | "M" | "A",
+        clubName: p.clubName ?? s?.club,
+        score: p.recommendationScore,
+        isDoubtful: s?.status === "doubtful",
+        pctTitularisations: s?.pctTitularisations,
+        nextOpponentRank: s?.nextOpponentRank,
+        isHome: s?.isHome,
+        averageLast5: s?.averageLast5,
+        momentum: s?.momentum,
+      };
+    };
+    const benchAll = (["G", "D", "M", "A"] as const).flatMap((pos) => substitutes[pos] ?? []);
+    const tacticalSubs = buildTacticalSubs(
+      recommended.map(toCandidate),
+      benchAll.map(toCandidate),
+      totalTeams
+    );
     const withReason = <T extends { id?: string; name?: string }>(p: T) => {
       const s =
         (p.id ? statusById.get(p.id) : undefined) ??
@@ -142,6 +175,7 @@ export async function POST(request: Request) {
       },
       lofteurs: lofteurs.map(withReason),
       suggestedCaptainId: captain?.id ?? captain?.name ?? null,
+      tacticalSubs,
     });
   } catch {
     return NextResponse.json({ error: "Erreur lors du calcul" }, { status: 500 });
