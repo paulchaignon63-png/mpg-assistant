@@ -37,6 +37,8 @@ export interface SubCandidate {
   midweekBefore?: boolean;
   /** Le club dispute un autre match juste après la journée. */
   midweekAfter?: boolean;
+  /** Nom de la compétition concernée (« Ligue des champions »), si connue. */
+  midweekCompetition?: string;
 }
 
 export interface TacticalSub {
@@ -175,7 +177,8 @@ function isEarlySubRisk(s: SubCandidate, b: SubCandidate): boolean {
  * journée, pas celui du remplaçant. Avant, le joueur arrive fatigué ; après,
  * l'entraîneur ménage souvent ses cadres.
  *
- * Inerte tant que la source ne fournit pas les coupes (cf. mpgstats-client).
+ * Alimenté par la coupe d'Europe (lib/euro-fixtures) et, le cas échéant, par
+ * les autres compétitions vues dans le calendrier MPGStats.
  */
 function congestionEdge(s: SubCandidate, b: SubCandidate): "before" | "after" | null {
   const benchFree = !b.midweekBefore && !b.midweekAfter;
@@ -249,16 +252,17 @@ export function buildTacticalSubs(
     // Sécurité « enchaînement » : le club du titulaire a un autre match accolé.
     if (delta >= -CONGESTION_MARGIN) {
       const edge = congestionEdge(s, best);
+      const comp = s.midweekCompetition ?? "un autre match";
       if (edge === "before") {
         consider(
           "securite",
-          `${s.clubName ?? "Son club"} enchaîne un match juste avant : ${surname(s.name)} peut être ménagé ou fatigué, pas ${surname(best.name)}.`,
+          `${s.clubName ?? "Son club"} joue ${comp} juste avant : ${surname(s.name)} peut être fatigué ou ménagé, pas ${surname(best.name)}.`,
           70
         );
       } else if (edge === "after") {
         consider(
           "securite",
-          `${s.clubName ?? "Son club"} enchaîne un match juste après : risque que ${surname(s.name)} soit ménagé, pas ${surname(best.name)}.`,
+          `${s.clubName ?? "Son club"} enchaîne sur ${comp} juste après : risque que ${surname(s.name)} soit ménagé, pas ${surname(best.name)}.`,
           65
         );
       }

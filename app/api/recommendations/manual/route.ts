@@ -11,6 +11,7 @@ import { getChampionshipData } from "@/lib/mpgstats-client";
 import { getSeasonAssists, normalizeAssistKey } from "@/lib/espn-stats";
 import { buildReasons } from "@/lib/reasons";
 import { buildTacticalSubs, type SubCandidate } from "@/lib/tactical-subs";
+import { getEuroFixtures, findEuroFixture } from "@/lib/euro-fixtures";
 import {
   getRecommendedTeamWithSubstitutes,
   getSuggestedCaptain,
@@ -103,7 +104,27 @@ export async function POST(request: Request) {
     const statusById = new Map(selected.map((p) => [p.id, p]));
     const statusByName = new Map(selected.map((p) => [p.name, p]));
 
+    // Coupe d'Europe autour de la journée : un club engagé fait tourner.
+    // Best effort — une map vide n'empêche jamais le calcul de la compo.
+    const euroFixtures = await getEuroFixtures(nextMatchDate).catch(
+      () => new Map<string, import("@/lib/euro-fixtures").EuroFixture>()
+    );
+
     // Remplacements tactiques : titulaires vs banc, sur plusieurs critères.
+    /** Combine la coupe d'Europe (ESPN) et les autres matchs vus par MPGStats. */
+    const euroFlags = (
+      clubName: string | undefined,
+      mpgBefore: boolean | undefined,
+      mpgAfter: boolean | undefined
+    ) => {
+      const euro = findEuroFixture(euroFixtures, clubName);
+      return {
+        midweekBefore: mpgBefore || (euro?.before === true) || undefined,
+        midweekAfter: mpgAfter || (euro != null && !euro.before) || undefined,
+        midweekCompetition: euro?.competition,
+      };
+    };
+
     const toCandidate = (p: {
       id?: string;
       name?: string;
@@ -127,8 +148,7 @@ export async function POST(request: Request) {
         averageLast5: s?.averageLast5,
         momentum: s?.momentum,
         last5Minutes: s?.last5Minutes,
-        midweekBefore: s?.midweekBefore,
-        midweekAfter: s?.midweekAfter,
+        ...euroFlags(p.clubName ?? s?.club, s?.midweekBefore, s?.midweekAfter),
       };
     };
     const benchAll = (["G", "D", "M", "A"] as const).flatMap((pos) => substitutes[pos] ?? []);
