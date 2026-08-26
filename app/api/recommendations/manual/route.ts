@@ -126,6 +126,7 @@ export async function POST(request: Request) {
         isHome: s?.isHome,
         averageLast5: s?.averageLast5,
         momentum: s?.momentum,
+        last5Minutes: s?.last5Minutes,
       };
     };
     const benchAll = (["G", "D", "M", "A"] as const).flatMap((pos) => substitutes[pos] ?? []);

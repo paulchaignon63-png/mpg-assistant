@@ -4,8 +4,9 @@
  * une suggestion n'apparaît que si une vraie raison la justifie.
  *
  * Deux natures de suggestion (étiquetées, expliquées en une ligne) :
- *  - « sécurité »  : le titulaire risque de ne pas jouer (incertain, ou souvent
- *                    remplaçant dans son club) → le banc sert de filet.
+ *  - « sécurité »  : le titulaire risque de ne pas jouer, ou pas jusqu'au bout
+ *                    (incertain, souvent remplaçant, ou sorti avant l'heure de
+ *                    jeu) → le banc sert de filet.
  *  - « alternative »: pour ce match précis, un joueur du banc est un meilleur
  *                    choix (adversaire, domicile/extérieur, forme, note estimée).
  *
@@ -30,6 +31,8 @@ export interface SubCandidate {
   isHome?: boolean;
   averageLast5?: number;
   momentum?: number;
+  /** Minutes jouées lors des 5 derniers matchs (0 = pas entré). */
+  last5Minutes?: number[];
 }
 
 export interface TacticalSub {
@@ -49,6 +52,16 @@ const ALT_MIN_DELTA = 0.6;
 const MATCH_PIEGE_MARGIN = 0.8;
 /** En dessous, un titulaire est jugé « rotation » dans son club (risque de ne pas jouer). */
 const ROTATION_TITU_THRESHOLD = 0.55;
+/**
+ * Temps de jeu : un joueur remplacé avant l'heure de jeu marque moins, cadre
+ * moins et voit sa note figée plus tôt. En dessous de ce seuil (minutes
+ * moyennes sur les matchs qu'il a joués), on considère qu'il sort tôt.
+ */
+const EARLY_SUB_MINUTES = 66;
+/** Au-dessus, un joueur va au bout de ses matchs. */
+const FULL_GAME_MINUTES = 80;
+/** Écart de note maximal toléré pour proposer un joueur au temps de jeu supérieur. */
+const MINUTES_MARGIN = 0.7;
 /** Nombre maximum de suggestions affichées. */
 const MAX_SUBS = 5;
 
@@ -130,6 +143,27 @@ function matchPiegeReason(s: SubCandidate, b: SubCandidate, totalTeams: number):
   return `Coup de poker : ${so} a un match difficile${sDesc}, ${bo} un match bien plus favorable${bDesc}.`;
 }
 
+
+/** Minutes moyennes sur les matchs réellement joués (ignore les matchs sans entrée). */
+function avgMinutes(p: SubCandidate): number | undefined {
+  const played = (p.last5Minutes ?? []).filter((m) => m > 0);
+  if (played.length === 0) return undefined;
+  return played.reduce((a, b) => a + b, 0) / played.length;
+}
+
+/**
+ * « Sort tôt » : le titulaire est systématiquement remplacé avant l'heure de jeu
+ * alors que le remplaçant va au bout. À MPG, un joueur sorti à la 60e a moins
+ * d'occasions de marquer/passer et sa note est figée plus tôt — un signal que la
+ * note seule ne capture pas.
+ */
+function isEarlySubRisk(s: SubCandidate, b: SubCandidate): boolean {
+  const sm = avgMinutes(s);
+  const bm = avgMinutes(b);
+  if (sm == null || bm == null) return false;
+  return sm < EARLY_SUB_MINUTES && bm >= FULL_GAME_MINUTES;
+}
+
 /**
  * Construit les remplacements tactiques suggérés à partir des titulaires et du banc.
  * `bench` = remplaçants recommandés (tous postes confondus).
@@ -160,51 +194,44 @@ export function buildTacticalSubs(
     const delta = best.score - s.score;
 
     let chosen: (TacticalSub & { priority: number }) | null = null;
+    const consider = (kind: SubKind, reason: string, priority: number) => {
+      if (!chosen || priority > chosen.priority) {
+        chosen = { kind, reason, out: pick(s), in: pick(best), priority };
+      }
+    };
 
-    // Sécurité : le titulaire risque de ne pas jouer.
+    // Sécurité : le titulaire risque de ne pas jouer (ou pas jusqu'au bout).
     if (doubtful) {
-      chosen = {
-        kind: "securite",
-        reason: `${surname(s.name)} est incertain pour ce match — ${surname(best.name)} assure le coup si besoin.`,
-        out: pick(s),
-        in: pick(best),
-        priority: 100,
-      };
+      consider(
+        "securite",
+        `${surname(s.name)} est incertain pour ce match — ${surname(best.name)} assure le coup si besoin.`,
+        100
+      );
     } else if (rotationRisk) {
-      chosen = {
-        kind: "securite",
-        reason: `${surname(s.name)} n'est pas toujours titulaire dans son club — ${surname(best.name)} en couverture.`,
-        out: pick(s),
-        in: pick(best),
-        priority: 55,
-      };
+      consider(
+        "securite",
+        `${surname(s.name)} n'est pas toujours titulaire dans son club — ${surname(best.name)} en couverture.`,
+        55
+      );
+    }
+
+    // Sécurité « temps de jeu » : sort avant l'heure de jeu alors que l'autre va au bout.
+    if (delta >= -MINUTES_MARGIN && isEarlySubRisk(s, best)) {
+      const sm = Math.round(avgMinutes(s) ?? 0);
+      consider(
+        "securite",
+        `${surname(s.name)} est souvent remplacé en cours de match (${sm} min en moyenne), ${surname(best.name)} va au bout.`,
+        50
+      );
     }
 
     // Alternative « pure note » : un banc nettement meilleur pour ce match précis.
     if (delta >= ALT_MIN_DELTA) {
-      const altPriority = 40 + delta * 12;
-      if (!chosen || altPriority > chosen.priority) {
-        chosen = {
-          kind: "alternative",
-          reason: altReason(s, best, totalTeams),
-          out: pick(s),
-          in: pick(best),
-          priority: altPriority,
-        };
-      }
+      consider("alternative", altReason(s, best, totalTeams), 40 + delta * 12);
     } else if (delta >= -MATCH_PIEGE_MARGIN && isMatchPiege(s, best, totalTeams)) {
       // Alternative « match piège » : le remplaçant est un peu en dessous mais
       // a un match bien plus favorable → coup de poker à considérer.
-      const mpPriority = 45;
-      if (!chosen || mpPriority > chosen.priority) {
-        chosen = {
-          kind: "alternative",
-          reason: matchPiegeReason(s, best, totalTeams),
-          out: pick(s),
-          in: pick(best),
-          priority: mpPriority,
-        };
-      }
+      consider("alternative", matchPiegeReason(s, best, totalTeams), 45);
     }
 
     if (chosen) scored.push(chosen);

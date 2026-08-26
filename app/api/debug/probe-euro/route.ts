@@ -6,25 +6,56 @@ export const maxDuration = 60;
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
-async function probe(label: string, url: string, slice = 600) {
-  try {
-    const r = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json" }, cache: "no-store" });
-    const text = await r.text();
-    return { label, status: r.status, len: text.length, shape: text.slice(0, slice) };
-  } catch (e) {
-    return { label, status: "ERR", error: String(e).slice(0, 150) };
-  }
-}
-
 export async function GET() {
-  const C = "https://sports.core.api.espn.com/v2/sports/soccer/leagues";
-  const out = await Promise.all([
-    probe("ucl-seasons-list", `${C}/uefa.champions/seasons?limit=4`),
-    probe("ucl-2027-t1", `${C}/uefa.champions/seasons/2027/types/1/events?limit=3`),
-    probe("ucl-2026-root", `${C}/uefa.champions/seasons/2026`, 900),
-    probe("ucl-allevents", `${C}/uefa.champions/events?limit=3`),
-    probe("ucl-2026-t2", `${C}/uefa.champions/seasons/2026/types/2/events?limit=3`),
-    probe("fra1-2026-events", `${C}/fra.1/seasons/2026/types/1/events?limit=3`),
-  ]);
-  return NextResponse.json({ probes: out });
+  const out: Record<string, unknown> = {};
+
+  // 1) MPGStats : quelles compétitions/saisons dans data.e ?
+  try {
+    const r = await fetch("https://backend.mpgstats.fr/leagues/Ligue-1_v2.json", {
+      headers: { "User-Agent": UA },
+      cache: "no-store",
+    });
+    const j = await r.json();
+    const events = j?.data?.e ?? [];
+    const bySeason: Record<string, { n: number; sample: unknown[] }> = {};
+    for (const e of events) {
+      const k = String(e.s ?? "?");
+      bySeason[k] ??= { n: 0, sample: [] };
+      bySeason[k].n++;
+      if (bySeason[k].sample.length < 2)
+        bySeason[k].sample.push({ t1: e.t1, t2: e.t2, dB: e.dB, d: e.d });
+    }
+    out.mpgstats = {
+      activeSeason: j?.data?.mL?.aS?.i,
+      lastRound: j?.data?.mL?.aS?.cD?.lD,
+      totalEvents: events.length,
+      bySeason,
+    };
+  } catch (e) {
+    out.mpgstats = { error: String(e).slice(0, 200) };
+  }
+
+  // 2) ESPN : forme d'un event UCL passé (confirme que la recette marchera)
+  try {
+    const r = await fetch(
+      "https://sports.core.api.espn.com/v2/sports/soccer/leagues/uefa.champions/events/401862897?lang=fr",
+      { headers: { "User-Agent": UA }, cache: "no-store" }
+    );
+    const j = await r.json();
+    out.espnEventShape = {
+      date: j?.date,
+      name: j?.name,
+      keys: Object.keys(j ?? {}).slice(0, 15),
+      competitorRefs: (j?.competitions?.[0]?.competitors ?? []).map(
+        (c: { id?: string; homeAway?: string; team?: { $ref?: string } }) => ({
+          homeAway: c.homeAway,
+          team: c.team?.$ref,
+        })
+      ),
+    };
+  } catch (e) {
+    out.espnEventShape = { error: String(e).slice(0, 200) };
+  }
+
+  return NextResponse.json(out);
 }
