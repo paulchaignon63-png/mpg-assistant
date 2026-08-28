@@ -31,7 +31,7 @@ interface SubEndpoint {
   score: number;
 }
 interface TacticalSub {
-  kind: "securite" | "alternative";
+  kind: "securite" | "filet" | "alternative";
   reason: string;
   out: SubEndpoint;
   in: SubEndpoint;
@@ -288,10 +288,16 @@ export default function OnzePage() {
                             className={`mr-2 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
                               s.kind === "securite"
                                 ? "bg-amber-400/15 text-amber-300"
-                                : "bg-sky-400/15 text-sky-300"
+                                : s.kind === "filet"
+                                  ? "bg-violet-400/15 text-violet-300"
+                                  : "bg-sky-400/15 text-sky-300"
                             }`}
                           >
-                            {s.kind === "securite" ? "Sécurité" : "Alternative"}
+                            {s.kind === "securite"
+                              ? "Sécurité"
+                              : s.kind === "filet"
+                                ? "Filet"
+                                : "Alternative"}
                           </span>
                           <span className="text-sm text-[#F9FAFB]">{s.reason}</span>
                         </div>

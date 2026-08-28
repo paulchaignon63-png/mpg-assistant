@@ -571,7 +571,9 @@ export function computePlayerScore(
       perfOffensiveParPoste = cleanSheets > 0 ? Math.min(10, cleanSheets * 1.5 / 3) : Math.min(10, (goals + assists) * 0.3);
     }
 
-    const bonusCote = Math.min(10, (player.quotation ?? 0) / 10);
+    // La cote MPG culmine autour de 50 : /5 étale donc la valeur du joueur sur
+    // toute l'échelle 0-10, là où /10 écrasait même les stars sous 5.
+    const bonusCote = Math.min(10, (player.quotation ?? 0) / 5);
     const momentumRaw = player.momentum ?? 0;
     const momentum = Math.max(0, Math.min(10, momentumRaw + 5));
     const pctTit = player.pctTitularisations ?? 0;
@@ -591,14 +593,25 @@ export function computePlayerScore(
       player.opponentGoalsFor
     );
 
+    // Pondérations : la valeur du joueur (cote) pesait 5 % — et valait 0 tant
+    // que la cote n'était pas lue — si bien qu'un cadre du championnat pouvait
+    // passer derrière un joueur moyen mieux loti sur le calendrier.
+    //
+    // Deux corrections, à somme constante :
+    //  - la cote monte à 15 %, car c'est le meilleur résumé du niveau réel ;
+    //  - le contexte du match descend à 20 %, parce qu'il est DÉJÀ appliqué
+    //    ensuite en multiplicateurs (adversaire, domicile) : il comptait deux
+    //    fois et écrasait la qualité intrinsèque ;
+    //  - la régularité descend à 5 % : `matchs / journées` sature à 10 pour
+    //    tout titulaire et n'apporte donc presque aucune information.
     base =
       formeRecentePonderee * 0.25 +
-      regularite * 0.1 +
+      regularite * 0.05 +
       perfOffensiveParPoste * 0.25 +
-      bonusCote * 0.05 +
+      bonusCote * 0.15 +
       momentum * 0.05 +
       bonusTitularisation * 0.05 +
-      contexteProchainMatch * 0.25 +
+      contexteProchainMatch * 0.2 +
       disponibiliteFine * 0.15 * 10;
   }
 

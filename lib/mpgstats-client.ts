@@ -307,7 +307,12 @@ interface MpgStatsEvent {
 
 interface MpgStatsFullRow extends MpgStatsRosterPlayer {
   c?: number;
-  q?: number; // cote
+  /**
+   * Cote MPG. Le champ `q` n'existe pas dans le flux : la cote est exposée
+   * sous `r`, avec son historique dans `rh` ({ f: avant, t: après }).
+   */
+  r?: number;
+  rh?: Array<{ d?: number; f?: number; t?: number }>;
   s?: MpgStatsPlayer["s"] & { Otr?: number };
   es?: { aP?: number; oaP?: number };
   p?: MpgStatsMatch[];
@@ -529,7 +534,7 @@ export async function getChampionshipData(
       last5Notes: notes.some((n) => n > 0) ? notes : undefined,
       last5Minutes: minutes.some((n) => n > 0) ? minutes : undefined,
       last5OpponentRounds: rounds.some((n) => n > 0) ? rounds : undefined,
-      quotation: p.q,
+      quotation: p.r,
       pctTitularisations,
       accuratePassPct,
       status,

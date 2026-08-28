@@ -10,6 +10,11 @@
  *                    Comme le remplacement MPG ne se déclenche QUE si le
  *                    titulaire ne joue pas, une sécurité ne coûte rien : on ne
  *                    lui impose ni note minimale ni écart maximal.
+ *  - « filet »     : le remplaçant est lui-même un titulaire potentiel. On le
+ *                    place en couverture d'un titulaire pour le cas où celui-ci
+ *                    rate son match — un vrai plan B, même sans risque
+ *                    identifié. C'est la logique « si X se troue, Y prend le
+ *                    relais ».
  *  - « alternative »: pour ce match précis, un joueur du banc est un meilleur
  *                    choix (adversaire, domicile/extérieur, forme, note estimée).
  *                    Là on fait sortir un joueur qui allait jouer : le banc doit
@@ -22,7 +27,7 @@
 
 import { MIN_SUBSTITUTE_SCORE } from "./recommendation";
 
-export type SubKind = "securite" | "alternative";
+export type SubKind = "securite" | "filet" | "alternative";
 
 export interface SubCandidate {
   id?: string;
@@ -71,6 +76,13 @@ const ROTATION_TITU_THRESHOLD = 0.55;
 const EARLY_SUB_MINUTES = 66;
 /** Au-dessus, un joueur va au bout de ses matchs. */
 const FULL_GAME_MINUTES = 80;
+/**
+ * « Filet » : note minimale pour qu'un remplaçant soit considéré comme un vrai
+ * plan B, et écart maximal au-delà duquel la couverture n'a plus de sens.
+ */
+const FILET_MIN_BENCH_SCORE = 6;
+const FILET_MAX_GAP = 2;
+
 /** Nombre maximum de suggestions affichées. */
 const MAX_SUBS = 5;
 
@@ -273,6 +285,17 @@ export function buildTacticalSubs(
         "securite",
         `${surname(s.name)} ne joue en moyenne que ${sm} min par match, ${surname(best.name)} va au bout.`,
         50 + (EARLY_SUB_MINUTES - sm) * 0.4
+      );
+    }
+
+    // --- Filet : le remplaçant est assez bon pour couvrir un raté du titulaire.
+    // La priorité augmente quand l'écart se resserre : on couvre en premier le
+    // titulaire pour qui le plan B rapporte le plus.
+    if (best.score >= FILET_MIN_BENCH_SCORE && delta >= -FILET_MAX_GAP) {
+      consider(
+        "filet",
+        `${surname(best.name)} (${best.score.toFixed(1)}) est un titulaire potentiel : plan B si ${surname(s.name)} rate son match.`,
+        20 + delta * 8
       );
     }
 
