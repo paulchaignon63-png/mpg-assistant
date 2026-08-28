@@ -205,6 +205,101 @@ function congestionEdge(s: SubCandidate, b: SubCandidate): "before" | "after" | 
  * Construit les remplacements tactiques suggérés à partir des titulaires et du banc.
  * `bench` = remplaçants recommandés (tous postes confondus).
  */
+/**
+ * Évalue UNE paire titulaire → remplaçant et renvoie la meilleure raison de la
+ * proposer, ou null. La priorité sert à départager quand plusieurs paires se
+ * disputent le même joueur.
+ */
+function evaluatePair(
+  s: SubCandidate,
+  b: SubCandidate,
+  totalTeams: number
+): { kind: SubKind; reason: string; priority: number } | null {
+  const doubtful = s.isDoubtful === true;
+  const pctTit = s.pctTitularisations ?? 1;
+  const delta = b.score - s.score;
+
+  /**
+   * Une ALTERNATIVE fait sortir un joueur qui, lui, va jouer : c'est un vrai
+   * arbitrage, donc le banc doit tenir la route et l'écart de note compte.
+   *
+   * Une SÉCURITÉ, non. Le remplacement ne se déclenche que si le titulaire
+   * défaille : il n'y a rien à perdre à en poser un, même avec un remplaçant
+   * moins bien noté — sans lui, le poste ne rapporte rien du tout.
+   */
+  const benchGoodEnough = b.score >= MIN_SUBSTITUTE_SCORE;
+
+  let chosen: { kind: SubKind; reason: string; priority: number } | null = null;
+  const consider = (kind: SubKind, reason: string, priority: number) => {
+    if (!chosen || priority > chosen.priority) chosen = { kind, reason, priority };
+  };
+
+  // --- Sécurités : le titulaire risque de ne pas jouer, ou pas jusqu'au bout.
+  if (doubtful) {
+    consider(
+      "securite",
+      `${surname(s.name)} est incertain pour ce match — ${surname(b.name)} assure le coup si besoin.`,
+      100
+    );
+  } else if (pctTit < ROTATION_TITU_THRESHOLD) {
+    consider(
+      "securite",
+      `${surname(s.name)} n'est titulaire que ${Math.round(pctTit * 100)} % du temps dans son club — ${surname(b.name)} en couverture.`,
+      55 + (ROTATION_TITU_THRESHOLD - pctTit) * 40
+    );
+  }
+
+  const edge = congestionEdge(s, b);
+  if (edge) {
+    const comp = s.midweekCompetition ?? "un autre match";
+    consider(
+      "securite",
+      edge === "before"
+        ? `${s.clubName ?? "Son club"} joue ${comp} juste avant : ${surname(s.name)} peut être fatigué ou ménagé, pas ${surname(b.name)}.`
+        : `${s.clubName ?? "Son club"} enchaîne sur ${comp} juste après : risque que ${surname(s.name)} soit ménagé, pas ${surname(b.name)}.`,
+      edge === "before" ? 70 : 65
+    );
+  }
+
+  if (isEarlySubRisk(s, b)) {
+    const sm = Math.round(avgMinutes(s) ?? 0);
+    consider(
+      "securite",
+      `${surname(s.name)} ne joue en moyenne que ${sm} min par match, ${surname(b.name)} va au bout.`,
+      50 + (EARLY_SUB_MINUTES - sm) * 0.4
+    );
+  }
+
+  // --- Filet : le remplaçant est assez bon pour couvrir un raté du titulaire.
+  if (b.score >= FILET_MIN_BENCH_SCORE && delta >= -FILET_MAX_GAP) {
+    consider(
+      "filet",
+      `${surname(b.name)} (${b.score.toFixed(1)}) est un titulaire potentiel : plan B si ${surname(s.name)} rate son match.`,
+      20 + delta * 8
+    );
+  }
+
+  // --- Alternatives : sortir un joueur qui va jouer. Le banc doit tenir.
+  if (benchGoodEnough) {
+    if (delta >= ALT_MIN_DELTA) {
+      consider("alternative", altReason(s, b, totalTeams), 40 + delta * 12);
+    } else if (delta >= -MATCH_PIEGE_MARGIN && isMatchPiege(s, b, totalTeams)) {
+      consider("alternative", matchPiegeReason(s, b, totalTeams), 45);
+    }
+  }
+
+  return chosen;
+}
+
+/**
+ * Construit les remplacements tactiques suggérés à partir des titulaires et du banc.
+ * `bench` = remplaçants recommandés (tous postes confondus).
+ *
+ * On évalue TOUTES les paires titulaire × remplaçant d'un même poste, puis on
+ * attribue au plus offrant. N'examiner que le meilleur remplaçant de chaque
+ * poste privait les autres titulaires de toute couverture dès qu'il était pris,
+ * alors qu'un deuxième remplaçant tout à fait valable attendait sur le banc.
+ */
 export function buildTacticalSubs(
   starters: SubCandidate[],
   bench: SubCandidate[],
@@ -214,107 +309,19 @@ export function buildTacticalSubs(
   for (const b of bench) {
     if (b.score > 0) benchByPos[b.position]?.push(b);
   }
-  for (const pos of Object.keys(benchByPos)) {
-    benchByPos[pos].sort((a, b) => b.score - a.score);
-  }
 
   const scored: Array<TacticalSub & { priority: number }> = [];
-
   for (const s of starters) {
-    const options = benchByPos[s.position] ?? [];
-    if (options.length === 0) continue;
-    const best = options[0];
-
-    const doubtful = s.isDoubtful === true;
-    const pctTit = s.pctTitularisations ?? 1;
-    const rotationRisk = pctTit < ROTATION_TITU_THRESHOLD;
-    const delta = best.score - s.score;
-
-    /**
-     * Une ALTERNATIVE fait sortir un joueur qui, lui, va jouer : c'est un vrai
-     * arbitrage, donc le banc doit tenir la route et l'écart de note compte.
-     *
-     * Une SÉCURITÉ, non. À MPG le remplacement tactique ne se déclenche que si
-     * le titulaire ne joue pas : il n'y a rien à perdre à en poser un, même
-     * avec un remplaçant moins bien noté — sans lui, le poste ne rapporte
-     * rien du tout. On ne lui applique donc ni seuil de note ni écart maximal.
-     */
-    const benchGoodEnough = best.score >= MIN_SUBSTITUTE_SCORE;
-
-    let chosen: (TacticalSub & { priority: number }) | null = null;
-    const consider = (kind: SubKind, reason: string, priority: number) => {
-      if (!chosen || priority > chosen.priority) {
-        chosen = { kind, reason, out: pick(s), in: pick(best), priority };
-      }
-    };
-
-    // --- Sécurités : le titulaire risque de ne pas jouer, ou pas jusqu'au bout.
-    if (doubtful) {
-      consider(
-        "securite",
-        `${surname(s.name)} est incertain pour ce match — ${surname(best.name)} assure le coup si besoin.`,
-        100
-      );
-    } else if (rotationRisk) {
-      // Plus la titularisation est basse, plus le filet est utile : la priorité
-      // suit la sévérité, car une place de banc peut être disputée.
-      consider(
-        "securite",
-        `${surname(s.name)} n'est titulaire que ${Math.round(pctTit * 100)} % du temps dans son club — ${surname(best.name)} en couverture.`,
-        55 + (ROTATION_TITU_THRESHOLD - pctTit) * 40
-      );
-    }
-
-    // Sécurité « enchaînement » : le club du titulaire a un autre match accolé.
-    const edge = congestionEdge(s, best);
-    if (edge) {
-      const comp = s.midweekCompetition ?? "un autre match";
-      consider(
-        "securite",
-        edge === "before"
-          ? `${s.clubName ?? "Son club"} joue ${comp} juste avant : ${surname(s.name)} peut être fatigué ou ménagé, pas ${surname(best.name)}.`
-          : `${s.clubName ?? "Son club"} enchaîne sur ${comp} juste après : risque que ${surname(s.name)} soit ménagé, pas ${surname(best.name)}.`,
-        edge === "before" ? 70 : 65
-      );
-    }
-
-    // Sécurité « temps de jeu » : sort avant l'heure de jeu alors que l'autre va au bout.
-    if (isEarlySubRisk(s, best)) {
-      const sm = Math.round(avgMinutes(s) ?? 0);
-      consider(
-        "securite",
-        `${surname(s.name)} ne joue en moyenne que ${sm} min par match, ${surname(best.name)} va au bout.`,
-        50 + (EARLY_SUB_MINUTES - sm) * 0.4
-      );
-    }
-
-    // --- Filet : le remplaçant est assez bon pour couvrir un raté du titulaire.
-    // La priorité augmente quand l'écart se resserre : on couvre en premier le
-    // titulaire pour qui le plan B rapporte le plus.
-    if (best.score >= FILET_MIN_BENCH_SCORE && delta >= -FILET_MAX_GAP) {
-      consider(
-        "filet",
-        `${surname(best.name)} (${best.score.toFixed(1)}) est un titulaire potentiel : plan B si ${surname(s.name)} rate son match.`,
-        20 + delta * 8
-      );
-    }
-
-    // --- Alternatives : sortir un joueur qui va jouer. Le banc doit tenir.
-    if (benchGoodEnough) {
-      if (delta >= ALT_MIN_DELTA) {
-        consider("alternative", altReason(s, best, totalTeams), 40 + delta * 12);
-      } else if (delta >= -MATCH_PIEGE_MARGIN && isMatchPiege(s, best, totalTeams)) {
-        // Le remplaçant est un peu en dessous mais a un match bien plus
-        // favorable → coup de poker à considérer.
-        consider("alternative", matchPiegeReason(s, best, totalTeams), 45);
+    for (const b of benchByPos[s.position] ?? []) {
+      const ev = evaluatePair(s, b, totalTeams);
+      if (ev) {
+        scored.push({ kind: ev.kind, reason: ev.reason, out: pick(s), in: pick(b), priority: ev.priority });
       }
     }
-
-    if (chosen) scored.push(chosen);
   }
 
-  // Tri par priorité, puis affectation gloutonne : un titulaire et un remplaçant
-  // ne peuvent apparaître qu'une seule fois.
+  // Attribution gloutonne : un titulaire et un remplaçant ne servent qu'une
+  // fois — un même remplaçant ne peut pas couvrir deux titulaires à la fois.
   scored.sort((a, b) => b.priority - a.priority);
   const usedOut = new Set<string>();
   const usedIn = new Set<string>();
