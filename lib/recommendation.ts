@@ -615,13 +615,21 @@ export function computePlayerScore(
       disponibiliteFine * 0.15 * 10;
   }
 
+  // Force de l'adversaire, en continu.
+  //
+  // Les paliers précédents (0,85 / 0,95 / 1,15 / 1,25) créaient des falaises
+  // arbitraires — 21 % d'écart entre affronter le 13e et le 14e — et une
+  // amplitude de ±25 % pour un seul match. Comme l'adversaire est DÉJÀ compté
+  // dans la base (contexteProchainMatch), cela le comptait deux fois et le
+  // calendrier finissait par peser plus lourd que le niveau du joueur.
+  //
+  // Une rampe linéaire garde le même sens (affronter le leader pénalise,
+  // affronter le dernier avantage) sans marche d'escalier ni sur-pondération.
   let adversaryMult = 1;
   const advRank = player.nextOpponentRank ?? opponentRank;
-  if (advRank != null && totalTeams > 0) {
-    if (advRank <= 3) adversaryMult = 0.85;
-    else if (advRank <= 10) adversaryMult = 0.95;
-    else if (advRank >= totalTeams - 2) adversaryMult = 1.25;
-    else if (advRank >= totalTeams - 4) adversaryMult = 1.15;
+  if (advRank != null && totalTeams > 1) {
+    const weakness = (Math.min(advRank, totalTeams) - 1) / (totalTeams - 1); // 0 = leader
+    adversaryMult = 0.88 + 0.24 * weakness;
   }
 
   let advAttackDefenseMult = 1;
