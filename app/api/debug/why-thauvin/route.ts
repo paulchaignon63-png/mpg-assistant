@@ -16,11 +16,8 @@ export async function GET() {
     trouves: rows.length,
     brut: rows.slice(0, 3).map((p: Record<string, unknown>) => ({
       nom: `${p.f ?? ""} ${p.n ?? ""}`.trim(),
-      clesRacine: Object.keys(p),
-      q: p.q,
-      v: (p as { v?: unknown }).v,
-      s_cles: p.s ? Object.keys(p.s as object) : null,
-      s: p.s,
+      i: p.i, k: p.k, r: p.r, rh: p.rh, a: p.a, sa: p.sa, la: p.la, fp: p.fp,
+      es: p.es, esp: p.esp,
     })),
   });
 }
