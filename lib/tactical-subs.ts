@@ -5,10 +5,15 @@
  *
  * Deux natures de suggestion (étiquetées, expliquées en une ligne) :
  *  - « sécurité »  : le titulaire risque de ne pas jouer, ou pas jusqu'au bout
- *                    (incertain, souvent remplaçant, ou sorti avant l'heure de
- *                    jeu) → le banc sert de filet.
+ *                    (incertain, souvent remplaçant, coupe d'Europe accolée, ou
+ *                    sorti avant l'heure de jeu) → le banc sert de filet.
+ *                    Comme le remplacement MPG ne se déclenche QUE si le
+ *                    titulaire ne joue pas, une sécurité ne coûte rien : on ne
+ *                    lui impose ni note minimale ni écart maximal.
  *  - « alternative »: pour ce match précis, un joueur du banc est un meilleur
  *                    choix (adversaire, domicile/extérieur, forme, note estimée).
+ *                    Là on fait sortir un joueur qui allait jouer : le banc doit
+ *                    donc être solide et l'écart de note est encadré.
  *
  * Max 5, souvent moins. Si rien ne se déclenche → aucune suggestion (le 11 est
  * considéré optimal). Un même titulaire et un même remplaçant n'apparaissent
@@ -66,10 +71,6 @@ const ROTATION_TITU_THRESHOLD = 0.55;
 const EARLY_SUB_MINUTES = 66;
 /** Au-dessus, un joueur va au bout de ses matchs. */
 const FULL_GAME_MINUTES = 80;
-/** Écart de note maximal toléré pour proposer un joueur au temps de jeu supérieur. */
-const MINUTES_MARGIN = 0.7;
-/** Écart de note maximal toléré pour proposer un joueur dont le club n'enchaîne pas. */
-const CONGESTION_MARGIN = 0.7;
 /** Nombre maximum de suggestions affichées. */
 const MAX_SUBS = 5;
 
@@ -211,11 +212,22 @@ export function buildTacticalSubs(
     const options = benchByPos[s.position] ?? [];
     if (options.length === 0) continue;
     const best = options[0];
-    if (best.score < MIN_SUBSTITUTE_SCORE) continue; // banc trop faible → pas de suggestion
 
     const doubtful = s.isDoubtful === true;
-    const rotationRisk = (s.pctTitularisations ?? 1) < ROTATION_TITU_THRESHOLD;
+    const pctTit = s.pctTitularisations ?? 1;
+    const rotationRisk = pctTit < ROTATION_TITU_THRESHOLD;
     const delta = best.score - s.score;
+
+    /**
+     * Une ALTERNATIVE fait sortir un joueur qui, lui, va jouer : c'est un vrai
+     * arbitrage, donc le banc doit tenir la route et l'écart de note compte.
+     *
+     * Une SÉCURITÉ, non. À MPG le remplacement tactique ne se déclenche que si
+     * le titulaire ne joue pas : il n'y a rien à perdre à en poser un, même
+     * avec un remplaçant moins bien noté — sans lui, le poste ne rapporte
+     * rien du tout. On ne lui applique donc ni seuil de note ni écart maximal.
+     */
+    const benchGoodEnough = best.score >= MIN_SUBSTITUTE_SCORE;
 
     let chosen: (TacticalSub & { priority: number }) | null = null;
     const consider = (kind: SubKind, reason: string, priority: number) => {
@@ -224,7 +236,7 @@ export function buildTacticalSubs(
       }
     };
 
-    // Sécurité : le titulaire risque de ne pas jouer (ou pas jusqu'au bout).
+    // --- Sécurités : le titulaire risque de ne pas jouer, ou pas jusqu'au bout.
     if (doubtful) {
       consider(
         "securite",
@@ -232,49 +244,47 @@ export function buildTacticalSubs(
         100
       );
     } else if (rotationRisk) {
+      // Plus la titularisation est basse, plus le filet est utile : la priorité
+      // suit la sévérité, car une place de banc peut être disputée.
       consider(
         "securite",
-        `${surname(s.name)} n'est pas toujours titulaire dans son club — ${surname(best.name)} en couverture.`,
-        55
-      );
-    }
-
-    // Sécurité « temps de jeu » : sort avant l'heure de jeu alors que l'autre va au bout.
-    if (delta >= -MINUTES_MARGIN && isEarlySubRisk(s, best)) {
-      const sm = Math.round(avgMinutes(s) ?? 0);
-      consider(
-        "securite",
-        `${surname(s.name)} est souvent remplacé en cours de match (${sm} min en moyenne), ${surname(best.name)} va au bout.`,
-        50
+        `${surname(s.name)} n'est titulaire que ${Math.round(pctTit * 100)} % du temps dans son club — ${surname(best.name)} en couverture.`,
+        55 + (ROTATION_TITU_THRESHOLD - pctTit) * 40
       );
     }
 
     // Sécurité « enchaînement » : le club du titulaire a un autre match accolé.
-    if (delta >= -CONGESTION_MARGIN) {
-      const edge = congestionEdge(s, best);
+    const edge = congestionEdge(s, best);
+    if (edge) {
       const comp = s.midweekCompetition ?? "un autre match";
-      if (edge === "before") {
-        consider(
-          "securite",
-          `${s.clubName ?? "Son club"} joue ${comp} juste avant : ${surname(s.name)} peut être fatigué ou ménagé, pas ${surname(best.name)}.`,
-          70
-        );
-      } else if (edge === "after") {
-        consider(
-          "securite",
-          `${s.clubName ?? "Son club"} enchaîne sur ${comp} juste après : risque que ${surname(s.name)} soit ménagé, pas ${surname(best.name)}.`,
-          65
-        );
-      }
+      consider(
+        "securite",
+        edge === "before"
+          ? `${s.clubName ?? "Son club"} joue ${comp} juste avant : ${surname(s.name)} peut être fatigué ou ménagé, pas ${surname(best.name)}.`
+          : `${s.clubName ?? "Son club"} enchaîne sur ${comp} juste après : risque que ${surname(s.name)} soit ménagé, pas ${surname(best.name)}.`,
+        edge === "before" ? 70 : 65
+      );
     }
 
-    // Alternative « pure note » : un banc nettement meilleur pour ce match précis.
-    if (delta >= ALT_MIN_DELTA) {
-      consider("alternative", altReason(s, best, totalTeams), 40 + delta * 12);
-    } else if (delta >= -MATCH_PIEGE_MARGIN && isMatchPiege(s, best, totalTeams)) {
-      // Alternative « match piège » : le remplaçant est un peu en dessous mais
-      // a un match bien plus favorable → coup de poker à considérer.
-      consider("alternative", matchPiegeReason(s, best, totalTeams), 45);
+    // Sécurité « temps de jeu » : sort avant l'heure de jeu alors que l'autre va au bout.
+    if (isEarlySubRisk(s, best)) {
+      const sm = Math.round(avgMinutes(s) ?? 0);
+      consider(
+        "securite",
+        `${surname(s.name)} ne joue en moyenne que ${sm} min par match, ${surname(best.name)} va au bout.`,
+        50 + (EARLY_SUB_MINUTES - sm) * 0.4
+      );
+    }
+
+    // --- Alternatives : sortir un joueur qui va jouer. Le banc doit tenir.
+    if (benchGoodEnough) {
+      if (delta >= ALT_MIN_DELTA) {
+        consider("alternative", altReason(s, best, totalTeams), 40 + delta * 12);
+      } else if (delta >= -MATCH_PIEGE_MARGIN && isMatchPiege(s, best, totalTeams)) {
+        // Le remplaçant est un peu en dessous mais a un match bien plus
+        // favorable → coup de poker à considérer.
+        consider("alternative", matchPiegeReason(s, best, totalTeams), 45);
+      }
     }
 
     if (chosen) scored.push(chosen);

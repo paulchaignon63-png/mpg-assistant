@@ -6,6 +6,7 @@ import {
   MIN_SUBSTITUTE_SCORE,
   type PoolPlayer,
 } from "@/lib/recommendation";
+import { buildTacticalSubs, type SubCandidate } from "@/lib/tactical-subs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -93,7 +94,27 @@ export async function GET() {
     };
   });
 
+  const toCand = (p: { id?: string; name?: string; position?: "G"|"D"|"M"|"A"; clubName?: string; recommendationScore: number }): SubCandidate => {
+    const st = p.id ? byId.get(p.id) : undefined;
+    const f2 = findEuroFixture(euro, st?.club);
+    return {
+      id: p.id, name: p.name,
+      position: (p.position ?? st?.position ?? "M") as "G"|"D"|"M"|"A",
+      clubName: st?.club, score: p.recommendationScore,
+      isDoubtful: st?.status === "doubtful",
+      pctTitularisations: st?.pctTitularisations,
+      nextOpponentRank: st?.nextOpponentRank, isHome: st?.isHome,
+      averageLast5: st?.averageLast5, momentum: st?.momentum,
+      last5Minutes: st?.last5Minutes,
+      midweekBefore: f2?.before === true || undefined,
+      midweekAfter: (f2 != null && !f2.before) || undefined,
+      midweekCompetition: f2?.competition,
+    };
+  };
+  const subs = buildTacticalSubs(recommended.map(toCand), bench.map(toCand), totalTeams);
+
   return NextResponse.json({
+    suggestions: subs.map((x) => `[${x.kind}] ${x.out.name} (${x.out.score}) -> ${x.in.name} (${x.in.score}) : ${x.reason}`),
     journee: nextMatchDate?.toISOString(),
     joueursReconnus: selected.length,
     manquants: NAMES.filter((n) => !picked.has(norm(n))),
