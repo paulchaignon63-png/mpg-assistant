@@ -10,6 +10,5 @@ export function GET() {
     scorerOdds: oddsApiEnabled(),
     push: !!(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY),
     vapidPublicKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? null,
-    mpgImport: true,
   });
 }

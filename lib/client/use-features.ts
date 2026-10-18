@@ -8,7 +8,6 @@ export interface Features {
   scorerOdds: boolean;
   push: boolean;
   vapidPublicKey: string | null;
-  mpgImport: boolean;
 }
 
 let cached: Promise<Features | null> | null = null;
