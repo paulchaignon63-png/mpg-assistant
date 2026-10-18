@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import type { RosterPlayer } from "@/lib/manual-league";
 import { parseLeagueCode } from "@/lib/manual-league";
 import { resolveEntriesToPlayers } from "@/lib/player-matching";
@@ -24,17 +23,15 @@ export function matchNames(pool: RosterPlayer[], entries: Array<{ name: string; 
 
 /**
  * Import rapide d'un effectif : liste de noms collée, capture d'écran lue par
- * l'IA, code de partage d'une autre ligue, ou connexion MPG.
+ * l'IA ou code de partage d'une autre ligue.
  */
 export function ImportPanel({
   pool,
-  leagueId,
   onImport,
   title = "Importer ton effectif",
 }: {
   pool: RosterPlayer[];
   title?: string;
-  leagueId?: string;
   onImport: (ids: string[]) => void;
 }) {
   const features = useFeatures();
@@ -115,13 +112,8 @@ export function ImportPanel({
 
   return (
     <div className="rounded-xl border border-line bg-card p-4">
-      <div className="mb-3 flex items-center justify-between gap-2">
+      <div className="mb-3">
         <h2 className="text-sm font-bold text-fg">{title}</h2>
-        {leagueId && (
-          <Link href={`/importer/mpg?ligue=${leagueId}`} className="text-xs font-medium text-accent">
-            Depuis MPG →
-          </Link>
-        )}
       </div>
       <div className="mb-3 flex gap-1.5 overflow-x-auto">
         {tabs

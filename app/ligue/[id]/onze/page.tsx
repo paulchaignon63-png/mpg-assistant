@@ -421,8 +421,6 @@ export default function OnzePage() {
               </div>
             )}
 
-            {league?.mpg && <SubmitToMpg league={league} result={result} />}
-
             {features?.chat && (
               <button
                 onClick={() => setChatOpen(true)}
@@ -453,8 +451,6 @@ export default function OnzePage() {
             .filter((x) => x.position === selected.position && x.id !== selected.id && x.role !== "out")
             .sort((a, b) => b.value - a.value)[0]}
           override={league.overrides[selected.id]}
-          championshipId={league.championshipId}
-          round={result.round}
           onOverride={(v) => {
             const next = { ...league.overrides };
             if (v == null) delete next[selected.id];
@@ -470,87 +466,11 @@ export default function OnzePage() {
   );
 }
 
-/** Envoi de la compo sur MPG, après confirmation explicite. */
-function SubmitToMpg({ league, result }: { league: NonNullable<ReturnType<typeof useLeague>[0]>; result: RecommendResult }) {
-  const [step, setStep] = useState<"idle" | "confirm" | "sending" | "done">("idle");
-  const [message, setMessage] = useState<string | null>(null);
-  if (!league.mpg) return null;
-  const mpg = league.mpg;
-
-  async function send() {
-    setStep("sending");
-    setMessage(null);
-    const starters = result.players.filter((p) => p.role === "starter").map((p) => ({ id: p.id, position: p.position }));
-    const bench = result.players
-      .filter((p) => p.role === "bench")
-      .sort((a, b) => (a.benchOrder ?? 0) - (b.benchOrder ?? 0))
-      .map((p) => ({ id: p.id, position: p.position }));
-    const res = await fetch("/api/mpg/submit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        divisionId: mpg.divisionId,
-        teamId: mpg.teamId,
-        championshipId: league.championshipId,
-        plan: {
-          formation: result.formation,
-          starters,
-          bench,
-          captainId: result.captainId,
-          tacticalSubs: result.tacticalSubs
-            .filter((t) => t.threshold != null)
-            .map((t) => ({ outId: t.out.id, inId: t.in.id, threshold: t.threshold })),
-        },
-      }),
-    }).catch(() => null);
-    const d = res ? await res.json().catch(() => ({})) : {};
-    if (!res || !res.ok) {
-      setStep("idle");
-      setMessage(res?.status === 401 ? "Session MPG expirée : reconnecte-toi depuis Importer depuis MPG." : d.error ?? "Envoi impossible.");
-      return;
-    }
-    setStep("done");
-    setMessage("Compo envoyée sur MPG. Vérifie-la dans l'app MPG.");
-  }
-
-  return (
-    <div className="mt-6 rounded-xl border border-line bg-card p-4">
-      {step === "confirm" ? (
-        <>
-          <p className="text-sm text-fg">
-            Remplacer ta compo MPG de la J{result.round} ({mpg.leagueName ?? league.name}) par celle-ci : {formatFormation(result.formation)},
-            capitaine {shortName(result.players.find((p) => p.id === result.captainId)?.name)}, {result.tacticalSubs.filter((t) => t.threshold != null).length} remplacement(s) tactique(s) ?
-          </p>
-          <div className="mt-3 flex gap-2">
-            <button onClick={send} className="flex-1 rounded-lg bg-emerald-600 py-2 text-sm font-medium text-white">
-              Oui, envoyer
-            </button>
-            <button onClick={() => setStep("idle")} className="flex-1 rounded-lg bg-chip py-2 text-sm text-fg">
-              Annuler
-            </button>
-          </div>
-        </>
-      ) : (
-        <button
-          onClick={() => setStep("confirm")}
-          disabled={step === "sending"}
-          className="w-full rounded-lg bg-emerald-600 py-2.5 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {step === "sending" ? "Envoi…" : step === "done" ? "Renvoyer sur MPG" : "Envoyer cette compo sur MPG"}
-        </button>
-      )}
-      {message && <p className="mt-2 text-sm text-muted">{message}</p>}
-    </div>
-  );
-}
-
 function PlayerSheet({
   p,
   captain,
   alternative,
   override,
-  championshipId,
-  round,
   onOverride,
   onClose,
 }: {
@@ -558,35 +478,10 @@ function PlayerSheet({
   captain: boolean;
   alternative?: SquadPlayer;
   override?: number;
-  championshipId: string;
-  round: number;
   onOverride: (v: number | undefined) => void;
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState(Math.round((override ?? p.pStart) * 100));
-  const voteKey = `vote:${championshipId}:${round}:${p.id}`;
-  const [voted, setVoted] = useState<string | null>(() => {
-    try {
-      return typeof window === "undefined" ? null : localStorage.getItem(voteKey);
-    } catch {
-      return null;
-    }
-  });
-
-  async function vote(v: "start" | "bench" | "out") {
-    setVoted(v);
-    try {
-      localStorage.setItem(voteKey, v);
-    } catch {
-      /* stockage bloqué */
-    }
-    await fetch("/api/crowd", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ championshipId, playerId: p.id, vote: v }),
-    }).catch(() => undefined);
-  }
-
   const base = p.explanation.find((e) => e.term === "base");
   const factors = p.explanation.filter((e) => e.term !== "base");
   const modelTotal = p.explanation.reduce((a, e) => a + e.value, 0);
@@ -742,30 +637,6 @@ function PlayerSheet({
               ))}
             </div>
           )}
-
-          {/* Communauté */}
-          <div className="mt-5">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-subtle">Tu as une info ? Dis-le à la communauté</p>
-            <div className="grid grid-cols-3 gap-2">
-              {(
-                [
-                  ["start", "Titulaire"],
-                  ["bench", "Remplaçant"],
-                  ["out", "Absent"],
-                ] as const
-              ).map(([k, label]) => (
-                <button
-                  key={k}
-                  disabled={!!voted}
-                  onClick={() => vote(k)}
-                  className={`rounded-lg py-1.5 text-xs ${voted === k ? "bg-emerald-600 text-white" : "bg-chip text-fg"} disabled:opacity-60`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            {voted && <p className="mt-1 text-[11px] text-subtle">Merci, ton signalement compte pour la prochaine mise à jour.</p>}
-          </div>
 
           <button onClick={onClose} className="mt-6 w-full rounded-lg bg-chip py-2.5 font-medium text-fg">
             Fermer

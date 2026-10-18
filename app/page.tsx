@@ -58,16 +58,11 @@ export default function HomePage() {
             ))}
           </div>
         ) : leagues.length === 0 ? (
-          <div className="space-y-4">
-            <EmptyState
+          <EmptyState
               icon="⚽"
               title="Aucune ligue"
-              description="Crée ta ligue, compose ton effectif (ou importe-le depuis MPG) : l'app te propose ton meilleur 11, ton banc et ton capitaine."
+              description="Crée ta ligue et compose ton effectif : l'app te propose ton meilleur 11, ton banc et ton capitaine."
             />
-            <Link href="/importer/mpg" className="block rounded-xl border border-line bg-card p-4 text-center text-sm text-fg">
-              Importer mes ligues depuis MPG →
-            </Link>
-          </div>
         ) : (
           <ul className="space-y-3">
             {leagues.map((l) => {
@@ -117,12 +112,9 @@ export default function HomePage() {
 
       <div className="fixed inset-x-0 bottom-0 border-t border-line bg-bg/95 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur">
         <div className="mx-auto flex max-w-md gap-2">
-          <Link href="/importer/mpg" className="flex-1 rounded-lg border border-line bg-card px-3 py-3 text-center text-sm font-medium text-fg">
-            Depuis MPG
-          </Link>
           <Link
             href="/creer"
-            className="flex flex-[2] items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 font-medium text-white transition hover:bg-emerald-500"
+            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 font-medium text-white transition hover:bg-emerald-500"
           >
             <span className="text-lg leading-none">+</span> Créer une ligue
           </Link>

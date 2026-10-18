@@ -11,17 +11,12 @@ Assistant pour Mon Petit Gazon (MPG) : ton meilleur 11, ton banc dans l'ordre, t
   - 5 dernières notes ;
   - décomposition de la note attendue ;
   - écart avec l'alternative ;
-  - hypothèse « et si » modifiable ;
-  - signalement à la communauté.
+  - hypothèse « et si » modifiable.
 - **Duel** : avec l'effectif de l'adversaire, probabilité de victoire, nul et défaite (buts réels + buts MPG), Cheat Code compris.
 - **Bonus** : force attendue sur les 6 prochaines journées et conseil pour chaque bonus.
 - **Bilan et direct** : pronostic figé, puis comparé aux vraies notes. Le bilan sépare la malchance (écart au pronostic) des choix (écart au meilleur 11 possible).
 - **Précision publique** : banc d'essai hors échantillon et suivi réel, journée après journée.
-- **Import d'effectif** : liste collée, capture d'écran (IA), code de partage, ou connexion MPG.
-- **MPG** :
-  - import de l'effectif et des bonus ;
-  - adversaire de la journée ;
-  - envoi de la compo, après confirmation.
+- **Saisie de l'effectif** : joueur par joueur, liste collée, capture d'écran (IA) ou code de partage. MPG refuse les connexions extérieures : l'effectif et l'adversaire se saisissent à la main.
 - **Alertes push** :
   - compo prête la veille ;
   - titulaire sur le banc (compo officielle) ;
@@ -40,7 +35,7 @@ Tout passe par `lib/engine/recommend.ts`, le seul moteur de l'app.
    - note attendue par poste, par régression linéaire ;
    - buts attendus par Poisson.
 4. **Signaux** (`lib/engine/project.ts`) :
-   - compos probables et officielles (RotoWire + communauté), pondérées par leur fiabilité mesurée ;
+   - compos probables et officielles (RotoWire), pondérées par leur fiabilité mesurée ;
    - statut du joueur ;
    - coupe d'Europe ;
    - cotes : clean sheet et buts attendus de l'équipe, cotes buteur ;
@@ -73,7 +68,7 @@ Pense à relancer `npm run train` puis `npm run backtest -- --champ 1,2,3,5 --ho
 
 ## Mise en production (Vercel)
 
-1. **Supabase** : crée un projet, exécute `supabase/migrations/001_kv.sql`, puis renseigne `SUPABASE_URL` et `SUPABASE_SERVICE_ROLE_KEY`. C'est indispensable pour les alertes, les votes et le suivi de précision : Vercel n'a pas de disque persistant.
+1. **Supabase** : crée un projet, exécute `supabase/migrations/001_kv.sql`, puis renseigne `SUPABASE_URL` et `SUPABASE_SERVICE_ROLE_KEY`. C'est indispensable pour les alertes et le suivi de précision : Vercel n'a pas de disque persistant.
 2. **Alertes** : `npm run vapid:keys`, puis renseigne `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` et `VAPID_SUBJECT`.
 3. **Tâche planifiée** : renseigne `CRON_SECRET`. `vercel.json` lance `/api/cron/refresh` une fois par jour, la seule fréquence permise par le plan gratuit. Pour un passage toutes les heures (compos officielles, alertes) :
    - ajoute les secrets `APP_URL` et `CRON_SECRET` au dépôt GitHub ;
@@ -85,6 +80,5 @@ Pense à relancer `npm run train` puis `npm run backtest -- --champ 1,2,3,5 --ho
 - **MPGStats** (backend public) : notes, minutes, buts, incidents, Elo, calendrier, cotes 1-N-2.
 - **RotoWire** : compos probables et officielles pour L1, PL, Liga et Serie A. La Ligue 2 n'est pas couverte.
 - **ESPN** : matchs de coupe d'Europe autour de la journée.
-- **MPG** : API non officielle, d'après [mpg-coach-bot](https://github.com/axel3rd/mpg-coach-bot). Elle peut changer sans prévenir.
 - **Effets non appris, réglés à la main** : coupe d'Europe, ajustement clean sheet et règle approchée du but MPG (`lib/engine/mpg-rules.ts`).
 - **Banc d'essai** : il ne voit pas les compos probables, faute d'historique. Pour la saison précédente, la cote MPG de l'époque est inconnue et remplacée par une valeur neutre.

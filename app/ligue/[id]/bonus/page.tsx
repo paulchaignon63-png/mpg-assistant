@@ -63,19 +63,6 @@ export default function BonusPage() {
   const weak = useMemo(() => (rounds?.length ? [...rounds].sort((a, b) => a.mean - b.mean)[0] : null), [rounds]);
   const totalBonuses = Object.values(league?.bonuses ?? {}).reduce((a, b) => a + b, 0);
 
-  async function importFromMpg() {
-    if (!league?.mpg) return;
-    setMessage(null);
-    const res = await fetch(`/api/mpg/import?teamId=${encodeURIComponent(league.mpg.teamId)}&championshipId=${league.championshipId}`);
-    const d = await res.json();
-    if (!res.ok) {
-      setMessage(d.error ?? "Import impossible.");
-      return;
-    }
-    update({ bonuses: d.bonuses ?? {} });
-    setMessage("Bonus mis à jour depuis MPG.");
-  }
-
   if (league === null) return null;
   const max = rounds?.length ? Math.max(...rounds.map((r) => r.p90)) : 1;
   const min = rounds?.length ? Math.min(...rounds.map((r) => r.p10)) : 0;
@@ -126,11 +113,6 @@ export default function BonusPage() {
         <div className="rounded-xl border border-line bg-card p-4">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-bold text-fg">Bonus restants</h2>
-            {league?.mpg && (
-              <button onClick={importFromMpg} className="text-xs text-accent">
-                Récupérer depuis MPG
-              </button>
-            )}
           </div>
           {remaining != null && totalBonuses > 0 && totalBonuses >= remaining * 0.5 && (
             <p className="mb-3 rounded-lg bg-amber-500/10 p-2 text-sm text-warn">

@@ -61,7 +61,6 @@ export default function RosterPage() {
           <>
             <ImportPanel
               pool={pool}
-              leagueId={leagueId}
               onImport={(ids) => update({ playerIds: [...new Set([...(league?.playerIds ?? []), ...ids])] })}
             />
             <PlayerPicker pool={pool} selected={selected} onToggle={toggle} />

@@ -78,13 +78,12 @@ export default function LeaguePage() {
           <p className="flex items-center gap-2 text-sm text-muted">
             {champ && <Flag code={champ.countryCode} size={18} />}
             {champ?.name} · {count} joueur{count > 1 ? "s" : ""}
-            {league?.mpg && <span className="rounded bg-chip px-1.5 text-[11px]">liée à MPG</span>}
           </p>
         </div>
 
         {count === 0 ? (
           <div className="rounded-xl border border-line bg-card p-6 text-center">
-            <p className="text-muted">Ton effectif est vide. Ajoute tes joueurs un par un, colle une liste ou importe-le depuis MPG.</p>
+            <p className="text-muted">Ton effectif est vide. Ajoute tes joueurs un par un, colle une liste ou importe une capture d&apos;écran.</p>
             <Link
               href={`/ligue/${leagueId}/effectif`}
               className="mt-4 inline-block rounded-lg bg-emerald-600 px-4 py-2.5 font-medium text-white hover:bg-emerald-500"

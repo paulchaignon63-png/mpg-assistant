@@ -3,9 +3,7 @@
  * source (à la manière de Fantacalcio-Online).
  *
  * Sources :
- *  - RotoWire (compos attendues puis officielles, L1 / PL / Liga / Serie A) ;
- *  - la communauté : les signalements « titulaire / remplaçant / absent » des
- *    utilisateurs de l'app pour la journée.
+ *  - RotoWire (compos attendues puis officielles, L1 / PL / Liga / Serie A).
  *
  * Après chaque journée, le cron compare la compo annoncée par chaque source
  * aux vrais titulaires (MPGStats) et met à jour son taux de réussite, qui
@@ -48,10 +46,6 @@ export function predictionKey(championshipId: string, seasonId: number, round: n
   return `lineup-pred:${championshipId}:${seasonId}:${round}:${source}`;
 }
 
-export function crowdKey(championshipId: string, seasonId: number, round: number): string {
-  return `crowd:${championshipId}:${seasonId}:${round}`;
-}
-
 /** Poids d'une source d'après sa réussite passée. */
 export function weightFromAccuracy(acc: SourceAccuracy | null): number {
   if (!acc || acc.total < 50) return DEFAULT_WEIGHT;
@@ -71,10 +65,6 @@ function mapTeam(team: TeamLineup, clubPlayers: Player[]): { starters: Set<strin
     [...resolveEntriesToPlayers(refs, team.absences.filter((a) => a.status === "doubtful").map((a) => ({ playerName: a.name }))).keys()].map(idOf)
   );
   return { starters, out, doubtful };
-}
-
-export interface CrowdVotes {
-  [playerId: string]: { start: number; bench: number; out: number };
 }
 
 export interface LineupBundle {
@@ -147,19 +137,6 @@ export async function getLineupSignals(snapshot: ChampionshipSnapshot, ctx: Roun
       clubs: Object.keys(pred.startersByClub).length,
       confirmed: pred.confirmedClubs.length,
     });
-  }
-
-  // --- Communauté
-  const votes = await store.get<CrowdVotes>(crowdKey(champ, ctx.seasonId, ctx.round)).catch(() => null);
-  if (votes) {
-    let n = 0;
-    for (const [id, v] of Object.entries(votes)) {
-      const total = v.start + v.bench + v.out;
-      if (total === 0) continue;
-      n++;
-      add(id, { p: v.start / total, w: Math.min(0.5, 0.12 * total), source: "communauté", confirmed: false });
-    }
-    if (n) sources.push({ source: "Communauté", weight: 0.5, clubs: n, confirmed: 0 });
   }
 
   // --- Agrégation : moyenne pondérée ; une compo officielle l'emporte.

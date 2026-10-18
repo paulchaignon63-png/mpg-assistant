@@ -4,7 +4,7 @@
  * Une ligue = un championnat + un effectif (identifiants de joueurs MPGStats)
  * + les réglages de la compo (formation, mode, hypothèses), l'adversaire de
  * la journée, les bonus restants et l'historique des pronostics (pour le
- * bilan d'après-journée). Une ligue peut être liée à une équipe MPG.
+ * bilan d'après-journée).
  */
 
 const STORAGE_KEY = "manual_leagues_v1";
@@ -25,12 +25,6 @@ export interface SavedPrediction {
   players: Record<string, { noteMean: number; pStart: number; value: number; name: string; position: string }>;
 }
 
-export interface MpgLink {
-  teamId: string;
-  divisionId: string;
-  leagueName?: string;
-}
-
 export interface ManualLeague {
   id: string;
   name: string;
@@ -49,7 +43,6 @@ export interface ManualLeague {
   /** Bonus MPG restants (code → nombre). */
   bonuses: Record<string, number>;
   history: SavedPrediction[];
-  mpg?: MpgLink;
   createdAt: number;
   updatedAt: number;
 }
@@ -113,14 +106,12 @@ export function createLeague(input: {
   name: string;
   championshipId: string;
   playerIds?: string[];
-  mpg?: MpgLink;
 }): ManualLeague {
   const league = migrate({
     id: newId(),
     name: input.name.trim() || "Ma ligue",
     championshipId: input.championshipId,
     playerIds: input.playerIds ?? [],
-    mpg: input.mpg,
   });
   persist([league, ...listLeagues()]);
   return league;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useLeague } from "@/lib/client/use-league";
@@ -19,21 +19,6 @@ export default function OpponentPage() {
   const selected = useMemo(() => new Set(league?.opponentPlayerIds ?? []), [league]);
   // Un joueur ne peut appartenir qu'à une équipe d'une même ligue MPG.
   const available = useMemo(() => (pool ?? []).filter((p) => !mine.has(p.id)), [pool, mine]);
-  const [mpgMessage, setMpgMessage] = useState<string | null>(null);
-
-  async function fromMpg() {
-    if (!league?.mpg) return;
-    setMpgMessage("Recherche de ton adversaire…");
-    const q = new URLSearchParams({ divisionId: league.mpg.divisionId, teamId: league.mpg.teamId, championshipId: league.championshipId });
-    const res = await fetch(`/api/mpg/opponent?${q}`).catch(() => null);
-    const d = res ? await res.json().catch(() => ({})) : {};
-    if (!res || !res.ok) {
-      setMpgMessage(d.error ?? "Adversaire introuvable.");
-      return;
-    }
-    update({ opponentPlayerIds: d.playerIds ?? [], opponentName: d.name || league.opponentName });
-    setMpgMessage(`Effectif de ${d.name || "ton adversaire"} récupéré (${(d.playerIds ?? []).length} joueurs).`);
-  }
 
   function toggle(id: string) {
     const next = new Set(selected);
@@ -57,15 +42,6 @@ export default function OpponentPage() {
             Saisis son effectif : on devine son 11 et on simule le match pour te donner tes chances de victoire.
           </p>
         </div>
-
-        {league?.mpg && (
-          <div className="rounded-xl border border-line bg-card p-4">
-            <button onClick={fromMpg} className="w-full rounded-lg bg-emerald-600 py-2.5 text-sm font-medium text-white">
-              Récupérer mon adversaire depuis MPG
-            </button>
-            {mpgMessage && <p className="mt-2 text-sm text-muted">{mpgMessage}</p>}
-          </div>
-        )}
 
         <div className="space-y-3 rounded-xl border border-line bg-card p-4">
           <label htmlFor="opp-name" className="block text-xs font-medium text-muted">
