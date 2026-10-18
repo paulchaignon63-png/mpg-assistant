@@ -1,3 +1,5 @@
+import { createClubMatcher } from "./clubs";
+
 /**
  * Matchs européens (Ligue des champions, Ligue Europa, Conference) autour de la
  * journée de championnat, via l'API publique ESPN (core).
@@ -54,100 +56,8 @@ export interface EuroFixture {
   competition: string;
 }
 
-/**
- * Mots trop courants pour identifier un club : ils sont ignorés lors de la
- * comparaison (« Olympique Lyonnais » et « Lyon » doivent se rapprocher).
- */
-const CLUB_NOISE = new Set([
-  "fc", "ac", "as", "sc", "sv", "cf", "cd", "rc", "ss", "ssc", "afc", "bsc",
-  "club", "clube", "de", "del", "di", "du", "des", "la", "le", "les", "los",
-  "calcio", "futbol", "football", "association", "sportiv", "sportive",
-  "1", "04", "05", "07", "08", "09", "1899", "1900",
-]);
-
-/**
- * Mots qui, eux, DISTINGUENT deux clubs d'une même ville : « Real » Madrid vs
- * « Atlético » Madrid, Manchester « United » vs « City ». Ils ne suffisent pas
- * à identifier un club, mais si les deux noms en portent et qu'ils diffèrent,
- * il s'agit forcément de clubs différents.
- */
-const CLUB_QUALIFIERS = new Set([
-  "real", "atletico", "athletic", "united", "city", "sporting", "olympique",
-  "stade", "racing", "inter", "milan", "roma", "lazio", "borussia", "bayer",
-  "bayern", "union", "west", "east", "nord", "sud",
-]);
-
-/**
- * Clubs que les deux sources nomment de façon irréconciliable par jetons, et
- * dont un rapprochement naïf produirait un faux positif grave.
- * « Paris » (PSG côté MPGStats) et « Paris FC » sont deux clubs de Ligue 1.
- */
-const CLUB_ALIASES: Record<string, string> = {
-  "paris": "psg",
-  "paris saint germain": "psg",
-  "paris sg": "psg",
-  "psg": "psg",
-  "paris fc": "paris-fc",
-};
-
-function normalizeClub(name: string): string {
-  return name
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-/** Identité canonique d'un club ambigu, sinon null. */
-function canonicalClub(name: string): string | null {
-  return CLUB_ALIASES[normalizeClub(name)] ?? null;
-}
-
-/** Jetons distinctifs d'un nom de club (« olympique lyonnais » → ["lyonnais"]). */
-function clubTokens(name: string): string[] {
-  return normalizeClub(name)
-    .split(" ")
-    .filter((t) => t.length >= 3 && !CLUB_NOISE.has(t) && !CLUB_QUALIFIERS.has(t));
-}
-
-function clubQualifiers(name: string): Set<string> {
-  return new Set(normalizeClub(name).split(" ").filter((t) => CLUB_QUALIFIERS.has(t)));
-}
-
-/**
- * Deux noms désignent-ils le même club ?
- *
- * 1. Si l'un des deux est un cas ambigu répertorié, l'identité canonique
- *    tranche seule (évite « Paris FC » ↔ « Paris Saint-Germain »).
- * 2. Sinon on exige un jeton distinctif commun (ou un préfixe d'au moins
- *    4 caractères : « lyon » / « lyonnais »)…
- * 3. …et l'absence de qualificatifs contradictoires, sans quoi « Real Madrid »
- *    et « Atlético Madrid » se confondraient.
- */
-export function clubsMatch(a: string, b: string): boolean {
-  const ca = canonicalClub(a);
-  const cb = canonicalClub(b);
-  if (ca || cb) return ca != null && cb != null && ca === cb;
-
-  const qa = clubQualifiers(a);
-  const qb = clubQualifiers(b);
-  if (qa.size > 0 && qb.size > 0) {
-    const shared = [...qa].some((q) => qb.has(q));
-    if (!shared) return false;
-  }
-
-  const ta = clubTokens(a);
-  const tb = clubTokens(b);
-  if (ta.length === 0 || tb.length === 0) return false;
-  for (const x of ta) {
-    for (const y of tb) {
-      if (x === y) return true;
-      if (x.length >= 4 && y.length >= 4 && (x.startsWith(y) || y.startsWith(x))) return true;
-    }
-  }
-  return false;
-}
+/** Rapprochement de clubs : règle commune à toute l'app (lib/clubs). */
+export { sameClub as clubsMatch } from "./clubs";
 
 async function fetchJson<T>(url: string): Promise<T | null> {
   try {
@@ -271,8 +181,6 @@ export function findEuroFixture(
   clubName: string | undefined
 ): EuroFixture | undefined {
   if (!clubName || fixtures.size === 0) return undefined;
-  for (const [espnName, fixture] of fixtures) {
-    if (clubsMatch(espnName, clubName)) return fixture;
-  }
-  return undefined;
+  const espnName = createClubMatcher([...fixtures.keys()])(clubName);
+  return espnName ? fixtures.get(espnName) : undefined;
 }

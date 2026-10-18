@@ -33,7 +33,7 @@ export default function RootLayout({
   return (
     <html lang="fr">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#0A1F1C] text-[#F9FAFB]`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-bg text-fg`}
       >
         <PwaRegistration />
         {children}

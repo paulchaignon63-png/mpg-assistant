@@ -6,6 +6,8 @@
  * Clé = nom de club normalisé (minuscule, sans accent).
  */
 
+import { clubKey } from "./clubs";
+
 export interface ClubColors {
   primary: string;
   secondary: string;
@@ -43,22 +45,13 @@ const COLORS: Record<string, ClubColors> = {
   "saint-etienne": { primary: "#0B7A3B", secondary: "#F9FAFB" },
 };
 
-function normalize(name: string): string {
-  return name
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+const BY_KEY = new Map<string, ClubColors>(
+  Object.entries(COLORS).map(([name, colors]) => [clubKey(name), colors])
+);
 
 export function getClubColors(clubName: string | undefined): ClubColors {
   if (!clubName) return FALLBACK;
-  const key = normalize(clubName);
-  if (COLORS[key]) return COLORS[key];
-  // Correspondance partielle (ex. "Stade Rennais" → "rennes")
-  for (const [k, v] of Object.entries(COLORS)) {
-    if (key.includes(k) || k.includes(key)) return v;
-  }
-  return FALLBACK;
+  // Même identité de club que le reste de l'app : « Paris FC » ne prend
+  // jamais les couleurs du PSG, ni l'inverse.
+  return BY_KEY.get(clubKey(clubName)) ?? FALLBACK;
 }

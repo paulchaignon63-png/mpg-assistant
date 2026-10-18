@@ -1,3 +1,4 @@
+import { getByClub } from "./clubs";
 /**
  * Client Sofascore - classement, matchs, effectifs
  * API interne non officielle (api.sofascore.com)
@@ -191,15 +192,7 @@ export async function fetchSofascoreStandingsAndFixtures(
   const result = new Map<string, number>();
   for (const { club, opponent } of clubToOpponent) {
     const oppNorm = normalize(opponent);
-    let rank: number | undefined = rankByClub.get(oppNorm);
-    if (rank == null) {
-      for (const [k, v] of rankByClub) {
-        if (k.includes(oppNorm) || oppNorm.includes(k)) {
-          rank = v;
-          break;
-        }
-      }
-    }
+    const rank: number | undefined = getByClub(rankByClub, oppNorm);
     if (rank != null) {
       const clubNorm = normalize(club);
       const existing = result.get(clubNorm);

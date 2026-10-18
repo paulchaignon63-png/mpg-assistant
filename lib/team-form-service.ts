@@ -3,6 +3,7 @@
  * Utilise les résultats Sofascore pour calculer victoires/nuls/défaites
  */
 
+import { sameClub } from "./clubs";
 import { getSofascoreMatchResults, type SofascoreMatchResult } from "./sofascore-client";
 
 export interface TeamFormResult {
@@ -24,9 +25,7 @@ function normalizeClubName(name: string): string {
 }
 
 function namesMatch(a: string, b: string): boolean {
-  if (a === b) return true;
-  if (a.includes(b) || b.includes(a)) return true;
-  return false;
+  return a === b || sameClub(a, b);
 }
 
 /**

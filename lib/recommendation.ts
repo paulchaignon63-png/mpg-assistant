@@ -1,6 +1,9 @@
 /**
- * Algorithme de recommandation - meilleur 11
- * Score = forme + disponibilité + difficulté adversaire
+ * ANCIEN moteur de recommandation (somme pondérée réglée à la main).
+ *
+ * Il n'est plus utilisé par l'app : le moteur actuel est lib/engine/. On le
+ * garde uniquement pour que le banc d'essai (lib/engine/backtest.ts) mesure le
+ * gain du nouveau moteur par rapport à l'ancien.
  */
 
 import type { MpgPlayer } from "@/types/mpg";

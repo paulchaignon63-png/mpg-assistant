@@ -3,6 +3,7 @@
  * Combine les fixtures Sofascore (round → home/away) avec le classement
  */
 
+import { getByClub } from "./clubs";
 import { fetchSofascoreStandingsAndFixtures } from "./sofascore-client";
 import { getSofascoreMatchResults } from "./sofascore-client";
 
@@ -61,25 +62,8 @@ export async function getRoundToOpponentRankMap(
     noteDate(homeNorm, round, m.startTimestamp);
     noteDate(awayNorm, round, m.startTimestamp);
 
-    let homeRank: number | undefined = rankByClub.get(awayNorm);
-    if (homeRank == null) {
-      for (const [k, v] of rankByClub) {
-        if (k.includes(awayNorm) || awayNorm.includes(k)) {
-          homeRank = v;
-          break;
-        }
-      }
-    }
-
-    let awayRank: number | undefined = rankByClub.get(homeNorm);
-    if (awayRank == null) {
-      for (const [k, v] of rankByClub) {
-        if (k.includes(homeNorm) || homeNorm.includes(k)) {
-          awayRank = v;
-          break;
-        }
-      }
-    }
+    const homeRank: number | undefined = getByClub(rankByClub, awayNorm);
+    const awayRank: number | undefined = getByClub(rankByClub, homeNorm);
 
     if (!result.has(round)) result.set(round, new Map());
     const roundMap = result.get(round)!;
@@ -100,15 +84,7 @@ export function countMatchesInWindow(
 ): number | undefined {
   if (!clubName?.trim() || !rounds?.length || matchDateByClub.size === 0) return undefined;
   const clubNorm = normalizeClubName(clubName);
-  let dates = matchDateByClub.get(clubNorm);
-  if (!dates) {
-    for (const [key, value] of matchDateByClub) {
-      if (key.includes(clubNorm) || clubNorm.includes(key)) {
-        dates = value;
-        break;
-      }
-    }
-  }
+  const dates = getByClub(matchDateByClub, clubNorm);
   if (!dates) return undefined;
   const cutoff = now.getTime() - days * 24 * 60 * 60 * 1000;
   let count = 0;
@@ -131,10 +107,5 @@ export function getOpponentRankForClubAndRound(
   const clubNorm = normalizeClubName(clubName);
   const roundData = roundMap.get(round);
   if (!roundData) return undefined;
-  const direct = roundData.get(clubNorm);
-  if (direct != null) return direct;
-  for (const [key, rank] of roundData) {
-    if (key.includes(clubNorm) || clubNorm.includes(key)) return rank;
-  }
-  return undefined;
+  return getByClub(roundData, clubNorm);
 }

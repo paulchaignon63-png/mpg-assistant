@@ -30,16 +30,6 @@ function extractFirstGroup(text: string, regex: string): string | null {
   return m ? m[1] : null;
 }
 
-function paramsToMap(params: string | null): Record<string, string> {
-  if (!params) return {};
-  const map: Record<string, string> = {};
-  params.split("&").forEach((p) => {
-    const [k, v] = p.split("=");
-    if (k && v) map[k] = decodeURIComponent(v);
-  });
-  return map;
-}
-
 export async function signInOidc(login: string, password: string): Promise<UserSignIn> {
   const amplitudeId = crypto.randomUUID();
 

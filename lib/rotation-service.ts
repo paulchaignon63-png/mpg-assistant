@@ -3,6 +3,7 @@
  * Si deux joueurs ont un taux de co-titularisation < 30%, ne pas recommander les deux.
  */
 
+import { getByClub } from "./clubs";
 import { getSofascoreLineupHistory } from "./sofascore-client";
 import type { Position } from "./recommendation";
 
@@ -107,12 +108,7 @@ export async function getCoTitularisationLowPairs(
   }
 
   function findMatchesForClub(clubNorm: string): Array<Set<string>> {
-    const direct = teamMatches.get(clubNorm);
-    if (direct?.length) return direct;
-    for (const [teamNorm, matches] of teamMatches) {
-      if (clubNorm.includes(teamNorm) || teamNorm.includes(clubNorm)) return matches;
-    }
-    return [];
+    return getByClub(teamMatches, clubNorm) ?? [];
   }
 
   for (const [clubNorm, byPos] of byClubAndPos) {

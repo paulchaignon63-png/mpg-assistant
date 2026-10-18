@@ -18,6 +18,8 @@
  * absence que mettre trois homonymes sur le banc.
  */
 
+import { sameClub } from "./clubs";
+
 /** Particules trop courantes pour identifier un joueur à elles seules. */
 const STOP_TOKENS = new Set(["van", "von", "der", "den", "dos", "das", "ben", "abd"]);
 
@@ -52,17 +54,8 @@ export function significantTokens(key: string): string[] {
     .filter((t) => t.length >= MIN_TOKEN_LENGTH && !STOP_TOKENS.has(t));
 }
 
-/** Deux libellés de club désignent-ils le même club ? */
-export function clubsMatch(a: string | undefined, b: string | undefined): boolean {
-  if (!a?.trim() || !b?.trim()) return false;
-  const na = normalizePlayerKey(a);
-  const nb = normalizePlayerKey(b);
-  if (!na || !nb) return false;
-  if (na === nb) return true;
-  // Les sources écrivent "Paris Saint-Germain", "PSG", "Paris SG"… on tolère
-  // l'inclusion ici : le club ne sert qu'à départager, jamais à matcher seul.
-  return na.includes(nb) || nb.includes(na);
-}
+/** Deux libellés de club désignent-ils le même club ? Règle commune : lib/clubs. */
+export { sameClub as clubsMatch };
 
 /**
  * Clubs compatibles : si l'un des deux est inconnu on ne peut pas trancher,
@@ -70,7 +63,7 @@ export function clubsMatch(a: string | undefined, b: string | undefined): boolea
  */
 function clubsCompatible(a: string | undefined, b: string | undefined): boolean {
   if (!a?.trim() || !b?.trim()) return true;
-  return clubsMatch(a, b);
+  return sameClub(a, b);
 }
 
 interface Indexed {

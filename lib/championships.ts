@@ -4,7 +4,8 @@
  * On n'expose que ceux pour lesquels le vivier de joueurs est réellement
  * disponible sans MPG (via Sofascore + MPGStats). La Ligue des Champions est
  * volontairement exclue : ses effectifs recoupent les autres championnats et
- * elle ne correspond pas à une ligue MPG classique.
+ * elle ne correspond pas à une ligue MPG classique. La Super Lig turque n'est
+ * pas proposée : MPGStats ne publie pas ses données.
  */
 
 export interface ChampionshipOption {
@@ -21,7 +22,6 @@ const CHAMPIONSHIPS: ChampionshipOption[] = [
   { id: "3", name: "La Liga", countryCode: "es" },
   { id: "5", name: "Serie A", countryCode: "it" },
   { id: "4", name: "Ligue 2", countryCode: "fr" },
-  { id: "7", name: "Super Lig", countryCode: "tr" },
 ];
 
 export function getSupportedChampionships(): ChampionshipOption[] {

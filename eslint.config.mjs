@@ -12,6 +12,13 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Extension navigateur (globales chrome.*) et fichiers locaux de travail.
+    "extension/**",
+    ".cache/**",
+    ".data/**",
+    ".dev-scratch/**",
+    // Script Node en CommonJS.
+    "scripts/generate-icons.js",
   ]),
 ]);
 
