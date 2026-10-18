@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <title>Le 11 parfait</title>
+  <style>
+    body { width: 300px; margin: 0; padding: 14px; font: 13px/1.4 system-ui, sans-serif; background: #0a1f1c; color: #f9fafb; }
+    h1 { font-size: 15px; margin: 0 0 8px; }
+    label { display: block; margin: 10px 0 4px; color: #9ca3af; font-size: 12px; }
+    input, textarea { width: 100%; box-sizing: border-box; background: #0f2f2b; color: #f9fafb; border: 1px solid #1f4641; border-radius: 8px; padding: 7px; font: inherit; }
+    button { margin-top: 12px; width: 100%; background: #059669; color: #fff; border: 0; border-radius: 8px; padding: 9px; font: 600 13px system-ui; cursor: pointer; }
+    p { color: #9ca3af; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Le 11 parfait</h1>
+  <p>Dans l'app, ouvre ta ligue et touche « Copier le code de partage », puis colle-le ici.</p>
+  <label for="appUrl">Adresse de l'app</label>
+  <input id="appUrl" placeholder="https://ton-app.vercel.app" />
+  <label for="leagueCode">Code de ta ligue</label>
+  <textarea id="leagueCode" rows="3"></textarea>
+  <button id="save">Enregistrer</button>
+  <p id="status"></p>
+  <script src="popup.js"></script>
+</body>
+</html>
