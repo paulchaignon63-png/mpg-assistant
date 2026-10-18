@@ -7,16 +7,21 @@ import { useLeague } from "@/lib/client/use-league";
 import { shortName } from "@/lib/names";
 import { formatFormation } from "@/lib/engine/mpg-rules";
 
-/** Bonus MPG (codes de l'API, cf. mpg-coach-bot) et quand les jouer. */
+/**
+ * Bonus MPG (codes de l'API, cf. mpg-coach-bot) et quand les jouer.
+ * Effets vérifiés le 18/10/2026 : article Ligue 1 sur la saison 2025-26
+ * (Cheat Code) et guide Fantasy Coach d'août 2023 (les autres bonus).
+ * Un bonus par match ; le capitaine (+0,5, joueur de champ) s'ajoute.
+ */
 const BONUSES: Array<{ code: string; name: string; effect: string; when: "weak" | "strong" | "opponent" }> = [
-  { code: "boostOnePlayer", name: "UberEats", effect: "Booste la note d'un de tes joueurs.", when: "strong" },
-  { code: "boostAllPlayers", name: "Zahia", effect: "Booste la note de toute ton équipe.", when: "weak" },
-  { code: "removeGoal", name: "Valise à Nanard", effect: "Annule un but adverse.", when: "opponent" },
-  { code: "nerfGoalkeeper", name: "Suarez", effect: "Affaiblit le gardien adverse.", when: "opponent" },
-  { code: "nerfAllPlayers", name: "Cheat Code 18-26", effect: "−0,5 sur chaque joueur de champ adverse (se retourne contre toi si vous le jouez tous les deux).", when: "opponent" },
-  { code: "blockTacticalSubs", name: "Tonton Pat'", effect: "Bloque les remplacements tactiques adverses.", when: "opponent" },
-  { code: "mirror", name: "Miroir", effect: "Renvoie le bonus de l'adversaire.", when: "opponent" },
-  { code: "fourStrikers", name: "4 attaquants", effect: "Permet d'aligner quatre attaquants.", when: "strong" },
+  { code: "boostOnePlayer", name: "UberEats", effect: "+1 sur la note d'un de tes joueurs. Ne se cumule pas avec le capitaine : vise un autre joueur.", when: "strong" },
+  { code: "boostAllPlayers", name: "Zahia", effect: "+0,5 sur la note de chacun de tes titulaires (pas les remplaçants).", when: "weak" },
+  { code: "removeGoal", name: "Valise à Nanard", effect: "Annule un but adverse, réel ou MPG (pas un but contre son camp ni un but dû à 3 Rotaldo).", when: "opponent" },
+  { code: "nerfGoalkeeper", name: "Suarez", effect: "−1 sur la note du gardien adverse.", when: "opponent" },
+  { code: "nerfAllPlayers", name: "Cheat Code 18-26", effect: "−0,5 sur chaque joueur adverse sauf le gardien, remplaçants en live compris. Si vous le jouez tous les deux, c'est toi qui prends les −0,5.", when: "opponent" },
+  { code: "blockTacticalSubs", name: "Tonton Pat'", effect: "Empêche tous les remplacements tactiques de ton adversaire.", when: "opponent" },
+  { code: "mirror", name: "Miroir", effect: "Retourne contre ton adversaire le bonus qu'il joue contre toi.", when: "opponent" },
+  { code: "fourStrikers", name: "Bonus 4 attaquants", effect: "Effet non documenté publiquement : vérifie sa description dans l'app MPG.", when: "strong" },
 ];
 
 interface PlannerRound {
@@ -128,7 +133,7 @@ export default function BonusPage() {
                   : b.when === "weak" && weak
                     ? `Plutôt en J${weak.round}, ta journée la plus faible (${weak.mean.toFixed(1)} pts attendus).`
                     : strong
-                      ? `Plutôt en J${strong.round}${b.code === "boostOnePlayer" && strong.bestPlayer ? ` sur ${shortName(strong.bestPlayer.name)}` : ""}, ta journée la plus forte.`
+                      ? `Plutôt en J${strong.round}${b.code === "boostOnePlayer" && strong.bestPlayer ? ` sur un bon joueur qui n'est pas ton capitaine (ex. ${shortName(strong.bestPlayer.name)} si tu captaines quelqu'un d'autre)` : ""}, ta journée la plus forte.`
                       : "";
               return (
                 <div key={b.code} className="flex items-start gap-3">
@@ -161,7 +166,7 @@ export default function BonusPage() {
           {message && <p className="mt-3 text-sm text-muted">{message}</p>}
         </div>
         <p className="text-[11px] text-subtle">
-          Les effets exacts des bonus dépendent des règles de ta ligue MPG ; vérifie-les dans l&apos;app MPG avant de les jouer.
+          Effets vérifiés le 18/10/2026 (article Ligue 1 pour la saison 2025-26, guide Fantasy Coach pour les autres bonus). MPG peut les modifier : en cas de doute, la description dans l&apos;app MPG fait foi.
         </p>
       </div>
     </div>
