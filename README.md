@@ -67,7 +67,7 @@ Pense à relancer `npm run train` puis `npm run backtest -- --champ 1,2,3,5 --ho
 
 ## Mise en production (Vercel)
 
-1. **Supabase** : crée un projet, exécute `supabase/migrations/001_kv.sql`, puis renseigne `SUPABASE_URL` et `SUPABASE_SERVICE_ROLE_KEY`. C'est indispensable pour les alertes et le suivi de précision : Vercel n'a pas de disque persistant.
+1. **Supabase** : crée un projet, exécute `supabase/migrations/001_onze_parfait_kv.sql`, puis renseigne `SUPABASE_URL` et `SUPABASE_SERVICE_ROLE_KEY`. C'est indispensable pour les alertes et le suivi de précision : Vercel n'a pas de disque persistant.
 2. **Alertes** : `npm run vapid:keys`, puis renseigne `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` et `VAPID_SUBJECT`.
 3. **Tâche planifiée** : renseigne `CRON_SECRET`. `vercel.json` lance `/api/cron/refresh` une fois par jour, la seule fréquence permise par le plan gratuit. Pour un passage toutes les heures (compos officielles, alertes) :
    - ajoute les secrets `APP_URL` et `CRON_SECRET` au dépôt GitHub ;

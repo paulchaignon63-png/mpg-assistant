@@ -2,7 +2,8 @@
  * Petit stockage clé → valeur côté serveur.
  *
  * - Supabase si SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY sont définis
- *   (table `kv`, cf. supabase/migrations/001_kv.sql) : c'est le mode prévu
+ *   (table `onze_parfait_kv`, cf. supabase/migrations/001_onze_parfait_kv.sql) :
+ *   c'est le mode prévu
  *   en production (Vercel n'a pas de disque persistant).
  * - Sinon, un dossier local .data/ (développement).
  *
@@ -23,22 +24,25 @@ export interface Store {
   readonly kind: "supabase" | "file";
 }
 
+/** Table préfixée : le projet Supabase est partagé avec d'autres apps. */
+const TABLE = "onze_parfait_kv";
+
 class SupabaseStore implements Store {
   readonly kind = "supabase" as const;
   constructor(private db: SupabaseClient) {}
   async get<T>(key: string): Promise<T | null> {
-    const { data } = await this.db.from("kv").select("value").eq("key", key).maybeSingle();
+    const { data } = await this.db.from(TABLE).select("value").eq("key", key).maybeSingle();
     return (data?.value as T) ?? null;
   }
   async set<T>(key: string, value: T): Promise<void> {
-    const { error } = await this.db.from("kv").upsert({ key, value, updated_at: new Date().toISOString() });
+    const { error } = await this.db.from(TABLE).upsert({ key, value, updated_at: new Date().toISOString() });
     if (error) throw new Error(`Stockage : ${error.message}`);
   }
   async delete(key: string): Promise<void> {
-    await this.db.from("kv").delete().eq("key", key);
+    await this.db.from(TABLE).delete().eq("key", key);
   }
   async list<T>(prefix: string): Promise<Array<{ key: string; value: T }>> {
-    const { data } = await this.db.from("kv").select("key, value").like("key", `${prefix}%`).limit(5000);
+    const { data } = await this.db.from(TABLE).select("key, value").like("key", `${prefix}%`).limit(5000);
     return (data ?? []).map((r) => ({ key: r.key as string, value: r.value as T }));
   }
 }
