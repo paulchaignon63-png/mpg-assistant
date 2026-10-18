@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { simulateLineup, simulateMatchup, type Projection } from "./simulate";
+import { simulateLineup, type Projection } from "./simulate";
 import { optimizeLineup, pickCaptain, teamScore100 } from "./optimize";
 import type { Pos } from "./mpg-rules";
 
@@ -91,16 +91,6 @@ describe("pickCaptain", () => {
     const a = p("M", 6, { id: "b" });
     const b = p("M", 6, { id: "a" });
     expect(pickCaptain([a, b], "balanced")).toBe("a");
-  });
-});
-
-describe("simulateMatchup", () => {
-  it("donne l'avantage à l'équipe nettement plus forte", () => {
-    const strong = [p("G", 7), p("D", 7), p("M", 7.5), p("A", 8, { goalRate: 0.6 })];
-    const weak = [p("G", 4), p("D", 4), p("M", 4), p("A", 4)];
-    const r = simulateMatchup({ starters: strong, bench: [] }, { starters: weak, bench: [] }, { sims: 500 });
-    expect(r.win).toBeGreaterThan(0.8);
-    expect(r.win + r.draw + r.loss).toBeCloseTo(1, 5);
   });
 });
 

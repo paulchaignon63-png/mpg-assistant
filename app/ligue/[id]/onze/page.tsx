@@ -75,8 +75,6 @@ export default function OnzePage() {
         m: league.mode,
         f: league.formation,
         o: league.overrides,
-        op: league.opponentPlayerIds,
-        cc: league.opponentCheatCode,
       })
     : null;
 
@@ -92,8 +90,6 @@ export default function OnzePage() {
         mode: league.mode,
         formation: league.formation,
         overrides: league.overrides,
-        opponentIds: league.opponentPlayerIds.length >= 11 ? league.opponentPlayerIds : undefined,
-        opponentCheatCode: league.opponentCheatCode,
       }),
     })
       .then((r) => r.json())
@@ -296,39 +292,6 @@ export default function OnzePage() {
                 </span>
               ))}
             </div>
-
-            {/* Duel contre l'adversaire */}
-            {result.matchup && (
-              <div className="mt-5 rounded-xl border border-line bg-card p-4">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-sm font-bold text-fg">Contre {league?.opponentName || "ton adversaire"}</h2>
-                  <Link href={`/ligue/${leagueId}/adversaire`} className="text-xs text-accent">
-                    Modifier
-                  </Link>
-                </div>
-                <div className="mt-3 flex h-3 overflow-hidden rounded-full" aria-hidden>
-                  <div className="bg-emerald-500" style={{ width: `${result.matchup.win * 100}%` }} />
-                  <div className="bg-chip-strong" style={{ width: `${result.matchup.draw * 100}%` }} />
-                  <div className="bg-red-500" style={{ width: `${result.matchup.loss * 100}%` }} />
-                </div>
-                <p className="mt-2 text-sm text-fg tabular-nums">
-                  Victoire {Math.round(result.matchup.win * 100)} % · nul {Math.round(result.matchup.draw * 100)} % · défaite{" "}
-                  {Math.round(result.matchup.loss * 100)} %
-                </p>
-                <p className="text-xs text-subtle">
-                  Son 11 probable : {formatFormation(result.matchup.opponentFormation)}, note {result.matchup.opponentScore}/100.
-                  {league?.opponentCheatCode && " Cheat Code adverse pris en compte (−0,5 sur tes joueurs de champ)."}
-                </p>
-              </div>
-            )}
-            {!result.matchup && (
-              <Link
-                href={`/ligue/${leagueId}/adversaire`}
-                className="mt-5 block rounded-xl border border-dashed border-chip-strong p-3 text-center text-sm text-muted"
-              >
-                Ajoute l&apos;effectif de ton adversaire pour voir tes chances de victoire →
-              </Link>
-            )}
 
             {/* Banc ordonné */}
             {bench.length > 0 && (

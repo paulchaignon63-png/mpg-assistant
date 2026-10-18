@@ -24,9 +24,6 @@ function buildContext(r: RecommendResult): string {
     totalAttendu: Math.round(r.stats.mean * 10) / 10,
     risqueRotaldo: Math.round(r.stats.rotaldoRate * 100),
     capitaine: r.players.find((p) => p.id === r.captainId)?.name,
-    duel: r.matchup
-      ? { victoire: Math.round(r.matchup.win * 100), nul: Math.round(r.matchup.draw * 100), defaite: Math.round(r.matchup.loss * 100) }
-      : undefined,
     joueurs: r.players.map((p) => ({
       nom: p.name,
       poste: p.position,

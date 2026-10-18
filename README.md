@@ -12,11 +12,10 @@ Assistant pour Mon Petit Gazon (MPG) : ton meilleur 11, ton banc dans l'ordre, t
   - décomposition de la note attendue ;
   - écart avec l'alternative ;
   - hypothèse « et si » modifiable.
-- **Duel** : avec l'effectif de l'adversaire, probabilité de victoire, nul et défaite (buts réels + buts MPG), Cheat Code compris.
 - **Bonus** : force attendue sur les 6 prochaines journées et conseil pour chaque bonus.
 - **Bilan et direct** : pronostic figé, puis comparé aux vraies notes. Le bilan sépare la malchance (écart au pronostic) des choix (écart au meilleur 11 possible).
 - **Précision publique** : banc d'essai hors échantillon et suivi réel, journée après journée.
-- **Saisie de l'effectif** : joueur par joueur, liste collée, capture d'écran (IA) ou code de partage. MPG refuse les connexions extérieures : l'effectif et l'adversaire se saisissent à la main.
+- **Saisie de l'effectif** : joueur par joueur, liste collée, capture d'écran (IA) ou code de partage. MPG refuse les connexions extérieures : l'effectif se saisit à la main.
 - **Alertes push** :
   - compo prête la veille ;
   - titulaire sur le banc (compo officielle) ;

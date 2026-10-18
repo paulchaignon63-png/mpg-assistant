@@ -1,8 +1,7 @@
 /**
  * POST /api/recommendations — le 11 recommandé pour un effectif.
  *
- * Corps : { championshipId, playerIds, mode?, formation?, overrides?,
- *           opponentIds?, opponentCheatCode? }
+ * Corps : { championshipId, playerIds, mode?, formation?, overrides? }
  * Aucune authentification MPG : tout vient de MPGStats et des sources
  * publiques (compos probables, cotes).
  */
@@ -45,8 +44,6 @@ export async function POST(request: Request) {
       mode: MODES.has(String(body.mode)) ? (body.mode as RecommendInput["mode"]) : "balanced",
       formation,
       overrides,
-      opponentIds: Array.isArray(body.opponentIds) ? body.opponentIds.map(String).slice(0, 40) : undefined,
-      opponentCheatCode: body.opponentCheatCode === true,
     });
     if ("error" in result) return NextResponse.json(result, { status: 502 });
     return NextResponse.json(result);

@@ -9,11 +9,9 @@
  */
 
 import {
-  CHEAT_CODE_MALUS,
   GOAL_VALUE,
   LINE_INDEX,
   LINE_SKIP_PENALTY,
-  MPG_GOAL,
   NOTE_MAX,
   NOTE_MIN,
   ROTALDO_NOTE,
@@ -137,11 +135,10 @@ function resolveLineup(
   return slots;
 }
 
-function teamValue(slots: Slot[], malus = 0): number {
+function teamValue(slots: Slot[]): number {
   let v = 0;
   for (const s of slots) {
-    const note = s.position !== "G" && s.playerId ? s.note - malus : s.note;
-    v += note + GOAL_VALUE * s.goals;
+    v += s.note + GOAL_VALUE * s.goals;
   }
   return v;
 }
@@ -168,11 +165,10 @@ function quantile(sorted: number[], q: number): number {
 export function simulateLineup(
   starters: Projection[],
   bench: Projection[],
-  opts: { sims?: number; seed?: number; cheatCodeAgainst?: boolean } = {}
+  opts: { sims?: number; seed?: number } = {}
 ): LineupStats {
   const sims = opts.sims ?? 2000;
   const rng = makeRng(opts.seed ?? 7);
-  const malus = opts.cheatCodeAgainst ? CHEAT_CODE_MALUS : 0;
   const all = [...starters, ...bench];
   const values: number[] = [];
   const usage: Record<string, number> = {};
@@ -181,7 +177,7 @@ export function simulateLineup(
     const outcomes = new Map<string, Outcome>();
     for (const p of all) outcomes.set(p.id, sampleOutcome(p, rng));
     const slots = resolveLineup(starters, bench, outcomes);
-    values.push(teamValue(slots, malus));
+    values.push(teamValue(slots));
     let hadRotaldo = false;
     for (const s of slots) {
       if (s.fromBench && s.playerId) usage[s.playerId] = (usage[s.playerId] ?? 0) + 1;
@@ -222,74 +218,3 @@ export function scoreActual(
   return { total: teamValue(slots), rotaldo: slots.filter((s) => s.playerId === null).length };
 }
 
-function lineAverage(slots: Slot[], pos: Pos): number | null {
-  const notes = slots.filter((s) => s.position === pos).map((s) => s.note);
-  return notes.length ? notes.reduce((a, b) => a + b, 0) / notes.length : null;
-}
-
-/** Buts MPG d'une équipe face à une autre, pour un tirage (règle approchée). */
-function mpgGoals(attack: Slot[], defense: Slot[]): number {
-  let goals = attack.reduce((a, s) => a + s.goals, 0);
-  const mid = lineAverage(defense, "M");
-  const def = lineAverage(defense, "D");
-  const gk = lineAverage(defense, "G");
-  for (const s of attack) {
-    if (s.goals > 0 || !MPG_GOAL.eligible.includes(s.position)) continue;
-    if (s.note < MPG_GOAL.minNote) continue;
-    if (mid != null && s.note <= mid) continue;
-    if (def != null && s.note <= def - MPG_GOAL.defenseOffset) continue;
-    if (gk != null && s.note <= gk) continue;
-    goals++;
-  }
-  return goals;
-}
-
-export interface MatchupStats {
-  win: number;
-  draw: number;
-  loss: number;
-  /** Écart moyen de buts MPG (positif = on gagne). */
-  goalDiff: number;
-}
-
-/** Probabilités de victoire / nul / défaite contre une équipe adverse. */
-export function simulateMatchup(
-  us: { starters: Projection[]; bench: Projection[] },
-  them: { starters: Projection[]; bench: Projection[] },
-  opts: { sims?: number; seed?: number; theyPlayCheatCode?: boolean; wePlayCheatCode?: boolean } = {}
-): MatchupStats {
-  const sims = opts.sims ?? 2000;
-  const rng = makeRng(opts.seed ?? 11);
-  let win = 0;
-  let draw = 0;
-  let diff = 0;
-  const applyMalus = (slots: Slot[], on: boolean) =>
-    on
-      ? slots.map((s) =>
-          s.position !== "G" && s.playerId ? { ...s, note: Math.max(NOTE_MIN, s.note - CHEAT_CODE_MALUS) } : s
-        )
-      : slots;
-  // Le Cheat Code se retourne contre son lanceur si les deux le jouent.
-  const bothCheat = opts.theyPlayCheatCode && opts.wePlayCheatCode;
-  for (let i = 0; i < sims; i++) {
-    const outcomes = new Map<string, Outcome>();
-    for (const p of [...us.starters, ...us.bench, ...them.starters, ...them.bench]) {
-      if (!outcomes.has(p.id)) outcomes.set(p.id, sampleOutcome(p, rng));
-    }
-    let ours = resolveLineup(us.starters, us.bench, outcomes);
-    let theirs = resolveLineup(them.starters, them.bench, outcomes);
-    if (bothCheat) {
-      ours = applyMalus(ours, true);
-      theirs = applyMalus(theirs, true);
-    } else {
-      ours = applyMalus(ours, !!opts.theyPlayCheatCode);
-      theirs = applyMalus(theirs, !!opts.wePlayCheatCode);
-    }
-    const a = mpgGoals(ours, theirs);
-    const b = mpgGoals(theirs, ours);
-    if (a > b) win++;
-    else if (a === b) draw++;
-    diff += a - b;
-  }
-  return { win: win / sims, draw: draw / sims, loss: 1 - (win + draw) / sims, goalDiff: diff / sims };
-}

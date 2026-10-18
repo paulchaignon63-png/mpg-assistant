@@ -1,7 +1,7 @@
 /**
  * Point d'entrée unique du moteur : un effectif (ids MPGStats) → le 11, le
  * banc ordonné, la formation, le capitaine, les remplacements tactiques, la
- * note d'équipe et, si un adversaire est fourni, les chances de victoire.
+ * et la note d'équipe.
  *
  * Tous les parcours (ligue créée à la main, import MPG, alertes, extension)
  * passent par ici : il n'y a plus qu'un moteur.
@@ -15,7 +15,6 @@ import { buildTacticalSubs, type SubCandidate, type TacticalSub } from "../tacti
 import { expectedValue, optimizeLineup, rivalKey, teamScore100, type FormationOption, type Mode } from "./optimize";
 import { COEFFICIENTS } from "./model";
 import { nextRound, projectPlayers, roundContext, type PlayerProjection, type RoundContext, type Signals } from "./project";
-import { simulateMatchup, type MatchupStats } from "./simulate";
 import { formatFormation } from "./mpg-rules";
 import { shortName } from "../names";
 
@@ -79,10 +78,6 @@ export interface RecommendInput {
   formation?: number | "auto";
   /** Hypothèses « et si » : probabilité de titularisation imposée. */
   overrides?: Record<string, number>;
-  /** Effectif de l'adversaire de la journée, pour le mode duel. */
-  opponentIds?: string[];
-  /** L'adversaire risque de jouer le Cheat Code 18-26. */
-  opponentCheatCode?: boolean;
   sims?: number;
 }
 
@@ -106,7 +101,6 @@ export interface RecommendResult {
   stats: { mean: number; p10: number; p90: number; rotaldoRate: number };
   summary: string;
   tacticalSubs: Array<TacticalSub & { threshold?: number }>;
-  matchup?: MatchupStats & { opponentFormation: number; opponentScore: number };
   lineupSources: LineupBundle["sources"];
   oddsAvailable: { matchOdds: boolean; scorerOdds: boolean };
   modelVersion: string;
@@ -232,21 +226,6 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult 
     return { ...s, threshold };
   });
 
-  let matchup: RecommendResult["matchup"];
-  if (input.opponentIds?.length) {
-    const oppSquad = input.opponentIds.map((id) => byId.get(id)).filter((p): p is Player => !!p);
-    if (oppSquad.length >= 11) {
-      const oppProj = projectPlayers(snapshot, ctx, oppSquad, { ...signals, overrides: undefined });
-      const oppPlan = optimizeLineup(oppProj, { formation: "auto", mode: "balanced", sims: 600 });
-      const m = simulateMatchup(
-        { starters: plan.starters, bench: plan.bench },
-        { starters: oppPlan.starters, bench: oppPlan.bench },
-        { sims: 3000, theyPlayCheatCode: input.opponentCheatCode }
-      );
-      matchup = { ...m, opponentFormation: oppPlan.formation, opponentScore: teamScore100(oppPlan.stats.mean) };
-    }
-  }
-
   return {
     round: data.round,
     firstKickoff: ctx.firstKickoff,
@@ -259,7 +238,6 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult 
     stats: { mean: plan.stats.mean, p10: plan.stats.p10, p90: plan.stats.p90, rotaldoRate: plan.stats.rotaldoRate },
     summary: buildSummary({ teamScore, players, rotaldoRate: plan.stats.rotaldoRate, formation: plan.formation }),
     tacticalSubs,
-    matchup,
     lineupSources: data.lineups.sources,
     oddsAvailable: {
       matchOdds: [...ctx.fixtureByClub.values()].some((f) => !!f.odds),

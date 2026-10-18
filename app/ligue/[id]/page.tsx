@@ -60,7 +60,6 @@ export default function LeaguePage() {
   }
 
   const actions = [
-    { href: `/ligue/${leagueId}/adversaire`, title: "Adversaire", text: league?.opponentPlayerIds.length ? `${league.opponentName || "Effectif saisi"}` : "Tes chances de victoire" },
     { href: `/ligue/${leagueId}/bonus`, title: "Bonus", text: "Quand jouer tes bonus" },
     { href: `/ligue/${leagueId}/live`, title: "En direct", text: "Ta journée en cours" },
     { href: `/ligue/${leagueId}/bilan`, title: "Bilan", text: lastPrediction ? `Dernier pronostic : J${lastPrediction.round}` : "Après chaque journée" },

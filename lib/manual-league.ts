@@ -2,8 +2,7 @@
  * Ligues mémorisées sur l'appareil (localStorage).
  *
  * Une ligue = un championnat + un effectif (identifiants de joueurs MPGStats)
- * + les réglages de la compo (formation, mode, hypothèses), l'adversaire de
- * la journée, les bonus restants et l'historique des pronostics (pour le
+ * + les réglages de la compo (formation, mode, hypothèses), les bonus restants et l'historique des pronostics (pour le
  * bilan d'après-journée).
  */
 
@@ -36,10 +35,6 @@ export interface ManualLeague {
   playerIds: string[];
   /** Hypothèses de titularisation saisies par l'utilisateur (0-1). */
   overrides: Record<string, number>;
-  /** Effectif de l'adversaire de la journée. */
-  opponentPlayerIds: string[];
-  opponentName?: string;
-  opponentCheatCode: boolean;
   /** Bonus MPG restants (code → nombre). */
   bonuses: Record<string, number>;
   history: SavedPrediction[];
@@ -54,8 +49,6 @@ function migrate(raw: Partial<ManualLeague> & { id: string; name: string; champi
     mode: "balanced",
     playerIds: [],
     overrides: {},
-    opponentPlayerIds: [],
-    opponentCheatCode: false,
     bonuses: {},
     history: [],
     createdAt: now,

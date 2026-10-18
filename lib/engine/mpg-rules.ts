@@ -58,24 +58,5 @@ export const LINE_SKIP_PENALTY = 1;
 export const NOTE_MIN = 1;
 export const NOTE_MAX = 10;
 
-/**
- * Bonus « Cheat Code 18-26 » (saison 2025-26) : −0,5 sur chaque joueur de
- * champ adverse, remplaçants entrés compris.
- */
-export const CHEAT_CODE_MALUS = 0.5;
-
-/**
- * But MPG (but « virtuel ») — APPROXIMATION à vérifier.
- * Un attaquant ou milieu titulaire qui n'a pas marqué de vrai but peut marquer
- * un but MPG si sa note dépasse, ligne après ligne, la moyenne des milieux
- * adverses, puis celle des défenseurs (moins ce décalage), puis la note du
- * gardien. Seuil de note minimal pour tenter sa chance.
- */
-export const MPG_GOAL = {
-  minNote: 5,
-  defenseOffset: 0,
-  eligible: ["A", "M"] as Pos[],
-};
-
 /** Valeur d'un vrai but pour classer les joueurs (en points de note). */
 export const GOAL_VALUE = 1;
