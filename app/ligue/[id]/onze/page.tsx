@@ -1,362 +1,545 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { getLeague, updateLeague, type ManualLeague } from "@/lib/manual-league";
-import { AVAILABLE_FORMATIONS, formatFormation } from "@/lib/recommendation";
-import { Jersey } from "@/components/Jersey";
-
-interface Reason {
-  label: string;
-  positive: boolean;
-}
-interface ResultPlayer {
-  id?: string;
-  name?: string;
-  position?: "G" | "D" | "M" | "A";
-  clubName?: string;
-  recommendationScore: number;
-  statusKind?: "ok" | "injured" | "suspended" | "doubtful";
-  scoreZeroReason?: "injured" | "suspended";
-  nextOpponentName?: string;
-  isHome?: boolean;
-  reasons?: Reason[];
-}
-interface SubEndpoint {
-  id: string;
-  name?: string;
-  clubName?: string;
-  position: "G" | "D" | "M" | "A";
-  score: number;
-}
-interface TacticalSub {
-  kind: "securite" | "filet" | "alternative";
-  reason: string;
-  out: SubEndpoint;
-  in: SubEndpoint;
-}
-interface OnzeResult {
-  formation: number;
-  nextMatchDate: string | null;
-  recommended: ResultPlayer[];
-  substitutes: Record<"G" | "D" | "M" | "A", ResultPlayer[]>;
-  lofteurs: ResultPlayer[];
-  suggestedCaptainId: string | null;
-  tacticalSubs?: TacticalSub[];
-}
+import type { RecommendResult, SquadPlayer } from "@/lib/engine/recommend";
+import { formatFormation } from "@/lib/engine/mpg-rules";
+import { savePrediction, type LeagueMode } from "@/lib/manual-league";
+import { useLeague, notifyLeagues } from "@/lib/client/use-league";
+import { useFeatures } from "@/lib/client/use-features";
+import { shortName } from "@/lib/names";
+import { PlayerToken, bandColor, bandLabel } from "@/components/PlayerToken";
+import { Sparkline } from "@/components/Sparkline";
+import { CoachChat } from "@/components/CoachChat";
 
 const POS_ORDER: Array<"G" | "D" | "M" | "A"> = ["G", "D", "M", "A"];
-// Bandes verticales sur le terrain (haut = attaque).
-const LINE_TOP: Record<string, number> = { A: 12, M: 37, D: 62, G: 86 };
+const LINE_TOP: Record<string, number> = { A: 13, M: 38, D: 63, G: 86 };
+const MODES: Array<{ key: LeagueMode; label: string; hint: string }> = [
+  { key: "safe", label: "Sûr", hint: "Privilégie les titulaires certains" },
+  { key: "balanced", label: "Équilibré", hint: "Meilleure espérance de points" },
+  { key: "poker", label: "Coup de poker", hint: "Vise le plus haut plafond" },
+];
 
-function surname(name?: string): string {
-  if (!name) return "";
-  const parts = name.trim().split(/\s+/);
-  return parts.length > 1 ? parts[parts.length - 1] : parts[0];
-}
-function scoreTier(s: number): string {
-  if (s >= 6) return "bg-emerald-500 text-[#04120E]";
-  if (s >= 5) return "bg-amber-400 text-[#1a1400]";
-  return "bg-[#3A5A54] text-[#F9FAFB]";
-}
-function statusLabel(p: ResultPlayer): string | null {
-  const k = p.statusKind ?? p.scoreZeroReason;
-  if (k === "injured") return "Blessé";
-  if (k === "suspended") return "Suspendu";
-  if (k === "doubtful") return "Incertain";
+function tagFor(p: SquadPlayer): { label: string; tone: string } | null {
+  if (p.status === "injured") return { label: "BLE", tone: "bg-red-600 text-white" };
+  if (p.status === "suspended") return { label: "SUS", tone: "bg-red-600 text-white" };
+  if (p.status === "out") return { label: "HG", tone: "bg-red-600 text-white" };
+  if (p.status === "doubtful") return { label: "INC", tone: "bg-amber-500 text-black" };
+  if (p.midweek) return { label: "EUR", tone: "bg-violet-500 text-white" };
+  if (p.yellowRisk) return { label: "J", tone: "bg-yellow-400 text-black" };
   return null;
 }
-function pid(p: ResultPlayer): string {
-  return p.id ?? p.name ?? "";
+
+function kickoffText(ts: number): string {
+  return new Date(ts * 1000).toLocaleString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function countdown(ts: number, now: number): string {
+  const s = Math.max(0, ts - now / 1000);
+  if (s <= 0) return "journée en cours";
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return d > 0 ? `${d} j ${h} h` : h > 0 ? `${h} h ${m} min` : `${m} min`;
 }
 
 export default function OnzePage() {
-  const params = useParams<{ id: string }>();
-  const leagueId = params.id;
-  const [league, setLeague] = useState<ManualLeague | null | undefined>(undefined);
-  const [formation, setFormation] = useState<number>(343);
-  const [result, setResult] = useState<OnzeResult | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { id: leagueId } = useParams<{ id: string }>();
+  const [league, update] = useLeague(leagueId);
+  const features = useFeatures();
+  const [result, setResult] = useState<RecommendResult | null>(null);
+  const [resultKey, setResultKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<ResultPlayer | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [openSub, setOpenSub] = useState<number | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    const lg = getLeague(leagueId);
-    setLeague(lg ?? null);
-    if (lg) setFormation(lg.formation);
-  }, [leagueId]);
+    const t = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Clé de calcul : tout ce qui change la compo.
+  const requestKey = league
+    ? JSON.stringify({
+        c: league.championshipId,
+        p: league.playerIds,
+        m: league.mode,
+        f: league.formation,
+        o: league.overrides,
+        op: league.opponentPlayerIds,
+        cc: league.opponentCheatCode,
+      })
+    : null;
 
   useEffect(() => {
-    if (league === undefined || league === null) return;
-    setLoading(true);
-    setError(null);
-    fetch("/api/recommendations/manual", {
+    if (!requestKey || !league) return;
+    let cancelled = false;
+    fetch("/api/recommendations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         championshipId: league.championshipId,
-        formation,
         playerIds: league.playerIds,
+        mode: league.mode,
+        formation: league.formation,
+        overrides: league.overrides,
+        opponentIds: league.opponentPlayerIds.length >= 11 ? league.opponentPlayerIds : undefined,
+        opponentCheatCode: league.opponentCheatCode,
       }),
     })
       .then((r) => r.json())
-      .then((d) => (d.error ? setError(d.error) : setResult(d)))
-      .catch(() => setError("Impossible de calculer le 11"))
-      .finally(() => setLoading(false));
-  }, [league, formation]);
+      .then((d: RecommendResult & { error?: string }) => {
+        if (cancelled) return;
+        if (d.error) {
+          setError(d.error);
+          return;
+        }
+        setError(null);
+        setResult(d);
+        setResultKey(requestKey);
+        // Pronostic figé pour le bilan d'après-journée.
+        savePrediction(leagueId, {
+          seasonRound: `${league.championshipId}:${d.round}`,
+          round: d.round,
+          savedAt: Date.now(),
+          formation: d.formation,
+          teamMean: d.stats.mean,
+          captainId: d.captainId,
+          starters: d.players.filter((p) => p.role === "starter").map((p) => p.id),
+          bench: d.players.filter((p) => p.role === "bench").sort((a, b) => (a.benchOrder ?? 0) - (b.benchOrder ?? 0)).map((p) => p.id),
+          players: Object.fromEntries(
+            d.players.map((p) => [
+              p.id,
+              { noteMean: p.noteMean, pStart: p.pStart, value: p.value, name: p.name, position: p.position },
+            ])
+          ),
+        });
+        notifyLeagues();
+      })
+      .catch(() => !cancelled && setError("Impossible de calculer le 11. Vérifie ta connexion."));
+    return () => {
+      cancelled = true;
+    };
+    // league est lu via requestKey, qui en résume tous les champs utiles.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestKey, leagueId]);
 
-  function changeFormation(f: number) {
-    setFormation(f);
-    updateLeague(leagueId, { formation: f });
-  }
+  const loading = !!league && !result && !error;
+  const recomputing = !!result && resultKey !== requestKey && !error;
+  const players = useMemo(() => result?.players ?? [], [result]);
+  const starters = players.filter((p) => p.role === "starter");
+  const bench = players.filter((p) => p.role === "bench").sort((a, b) => (a.benchOrder ?? 0) - (b.benchOrder ?? 0));
+  const unavailable = players.filter((p) => p.role !== "starter" && ["injured", "suspended", "out"].includes(p.status));
+  const selected = players.find((p) => p.id === selectedId) ?? null;
+  const bestFormation = result?.formations.filter((f) => !f.incomplete).sort((a, b) => b.mean - a.mean)[0]?.formation;
 
   if (league === null) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#0A1F1C] p-6 text-center text-[#9CA3AF]">
+      <div className="flex min-h-screen items-center justify-center p-6 text-center text-muted">
         <div>
           <p>Ligue introuvable.</p>
-          <Link href="/" className="mt-3 inline-block text-emerald-400">← Mes ligues</Link>
+          <Link href="/" className="mt-3 inline-block text-accent">
+            ← Mes ligues
+          </Link>
         </div>
       </div>
     );
   }
 
-  const captainId = result?.suggestedCaptainId ?? null;
-
   return (
-    <div className="min-h-screen bg-[#0A1F1C] px-4 pb-16 pt-6">
+    <div className="min-h-screen px-4 pb-20 pt-6">
       <div className="mx-auto w-full max-w-md">
-        <Link
-          href={`/ligue/${leagueId}`}
-          className="mb-4 inline-block text-sm text-[#9CA3AF] hover:text-[#F9FAFB]"
-        >
+        <Link href={`/ligue/${leagueId}`} className="mb-4 inline-block text-sm text-muted hover:text-fg">
           ← {league?.name ?? "Retour"}
         </Link>
 
-        <h1 className="text-2xl font-bold text-[#F9FAFB]">Ta compo</h1>
-        <p className="text-sm text-[#9CA3AF]">
-          {result?.nextMatchDate
-            ? `Prochain match : ${new Date(result.nextMatchDate).toLocaleString("fr-FR", {
-                weekday: "long",
-                day: "numeric",
-                month: "long",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}`
-            : "Ton meilleur onze"}
-        </p>
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-fg">Ta compo{result ? ` · J${result.round}` : ""}</h1>
+            <p className="text-sm text-muted">
+              {result?.firstKickoff
+                ? `1er match ${kickoffText(result.firstKickoff)} · clôture dans ${countdown(result.firstKickoff, now)}`
+                : "Ton meilleur onze"}
+            </p>
+          </div>
+        </div>
 
-        <div className="mt-4 mb-4 flex gap-2 overflow-x-auto pb-1">
-          {AVAILABLE_FORMATIONS.map((f) => (
+        {/* Résumé : note d'équipe + phrase */}
+        {result && (
+          <div className="mt-4 flex items-center gap-4 rounded-2xl border border-line bg-card p-4">
+            <div className="relative h-16 w-16 shrink-0">
+              <svg viewBox="0 0 36 36" className="h-16 w-16 -rotate-90" aria-hidden>
+                <circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--chip)" strokeWidth="3.5" />
+                <circle
+                  cx="18"
+                  cy="18"
+                  r="15.5"
+                  fill="none"
+                  stroke="var(--accent)"
+                  strokeWidth="3.5"
+                  strokeLinecap="round"
+                  strokeDasharray={`${(result.teamScore / 100) * 97.4} 97.4`}
+                />
+              </svg>
+              <span className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-lg font-bold leading-none text-fg tabular-nums">{result.teamScore}</span>
+                <span className="text-[9px] text-subtle">/100</span>
+              </span>
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm text-fg">{result.summary}</p>
+              <p className="mt-1 text-xs text-subtle tabular-nums">
+                Total attendu {result.stats.mean.toFixed(1)} pts · fourchette {result.stats.p10.toFixed(0)}–{result.stats.p90.toFixed(0)}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Mode de jeu */}
+        <div className="mt-4 grid grid-cols-3 gap-1 rounded-xl bg-chip p-1" role="radiogroup" aria-label="Mode de jeu">
+          {MODES.map((m) => (
             <button
-              key={f}
-              onClick={() => changeFormation(f)}
-              className={`shrink-0 rounded-full px-3 py-1 text-sm transition ${
-                formation === f ? "bg-emerald-600 text-[#F9FAFB]" : "bg-[#1F4641] text-[#9CA3AF]"
+              key={m.key}
+              role="radio"
+              aria-checked={league?.mode === m.key}
+              title={m.hint}
+              onClick={() => update({ mode: m.key })}
+              className={`rounded-lg px-2 py-1.5 text-xs font-medium transition ${
+                league?.mode === m.key ? "bg-card text-fg shadow" : "text-muted"
               }`}
             >
-              {formatFormation(f)}
+              {m.label}
             </button>
           ))}
         </div>
 
-        {loading && (
-          <div className="aspect-[3/4] w-full animate-pulse rounded-2xl bg-[#0F2F2B]/60" />
-        )}
-        {error && !loading && (
-          <p className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
-            {error}
-          </p>
+        {/* Formations avec leur total attendu */}
+        <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+          <button
+            onClick={() => update({ formation: "auto" })}
+            className={`shrink-0 rounded-full px-3 py-1 text-sm transition ${
+              league?.formation === "auto" ? "bg-emerald-600 text-white" : "bg-chip text-muted"
+            }`}
+          >
+            Auto{league?.formation === "auto" && result ? ` · ${formatFormation(result.formation)}` : ""}
+          </button>
+          {result?.formations.map((f) => (
+            <button
+              key={f.formation}
+              onClick={() => update({ formation: f.formation })}
+              disabled={f.incomplete}
+              className={`shrink-0 rounded-full px-3 py-1 text-sm tabular-nums transition disabled:opacity-35 ${
+                league?.formation === f.formation ? "bg-emerald-600 text-white" : "bg-chip text-muted"
+              }`}
+              title={f.incomplete ? "Pas assez de joueurs pour cette formation" : `Entre ${f.p10.toFixed(0)} et ${f.p90.toFixed(0)} pts`}
+            >
+              {formatFormation(f.formation)} · {f.mean.toFixed(1)}
+              {f.formation === bestFormation && <span className="ml-1 text-accent">★</span>}
+            </button>
+          ))}
+        </div>
+
+        {loading && <div className="mt-3 aspect-[3/4] w-full animate-pulse rounded-2xl bg-card" />}
+        {error && (
+          <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-danger">{error}</p>
         )}
 
-        {result && !loading && (
-          <>
+        {recomputing && <p className="mt-2 text-center text-xs text-subtle">Recalcul de la compo…</p>}
+        {result && (
+          <div className={recomputing ? "opacity-60 transition-opacity" : "transition-opacity"}>
             {/* Terrain */}
             <div
-              className="relative w-full overflow-hidden rounded-2xl border border-[#1F4641]"
-              style={{
-                aspectRatio: "3 / 4",
-                background:
-                  "repeating-linear-gradient(180deg, #14532d 0 12.5%, #166534 12.5% 25%)",
-              }}
+              className="relative mt-3 w-full max-w-full overflow-hidden rounded-2xl border border-line"
+              style={{ aspectRatio: "3 / 4", background: "repeating-linear-gradient(180deg, #14532d 0 12.5%, #166534 12.5% 25%)" }}
             >
               <div className="pointer-events-none absolute inset-2 rounded-lg border-2 border-white/20" />
-              <div className="pointer-events-none absolute left-2 right-2 top-1/2 h-0 border-t-2 border-white/20" />
+              <div className="pointer-events-none absolute left-2 right-2 top-1/2 border-t-2 border-white/20" />
               <div className="pointer-events-none absolute left-1/2 top-1/2 h-16 w-16 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white/20" />
               <div className="pointer-events-none absolute left-1/2 top-2 h-14 w-28 -translate-x-1/2 border-2 border-t-0 border-white/20" />
               <div className="pointer-events-none absolute bottom-2 left-1/2 h-14 w-28 -translate-x-1/2 border-2 border-b-0 border-white/20" />
-
               {POS_ORDER.map((pos) => {
-                const line = result.recommended.filter((p) => p.position === pos);
-                const n = line.length;
-                return line.map((p, i) => (
-                  <button
-                    key={pid(p)}
-                    onClick={() => setSelected(p)}
-                    className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center"
-                    style={{ top: `${LINE_TOP[pos]}%`, left: `${((i + 1) / (n + 1)) * 100}%` }}
-                  >
-                    <div className="relative">
-                      <Jersey club={p.clubName} size={42} />
-                      {pid(p) === captainId && (
-                        <span className="absolute -left-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-400 text-[9px] font-bold text-[#04120E]">
-                          C
-                        </span>
-                      )}
-                      <span
-                        className={`absolute -bottom-1 -right-1 rounded px-1 text-[10px] font-bold ${scoreTier(
-                          p.recommendationScore
-                        )}`}
-                      >
-                        {p.recommendationScore.toFixed(1)}
+                const line = starters.filter((p) => p.position === pos);
+                return line.map((p, i) => {
+                  const tag = tagFor(p);
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => setSelectedId(p.id)}
+                      className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center"
+                      style={{ top: `${LINE_TOP[pos]}%`, left: `${((i + 1) / (line.length + 1)) * 100}%` }}
+                      aria-label={`${p.name}, note attendue ${p.noteMean.toFixed(1)}, titulaire à ${Math.round(p.pStart * 100)} %`}
+                    >
+                      <PlayerToken club={p.club} pStart={p.pStart} captain={p.id === result.captainId} note={p.noteMean} size={38} />
+                      <span className="mt-0.5 flex max-w-[84px] items-center gap-0.5 rounded bg-black/55 px-1 text-[11px] font-medium text-white">
+                        <span className="truncate">{shortName(p.name)}</span>
+                        {tag && <span className={`rounded px-0.5 text-[8px] font-bold ${tag.tone}`}>{tag.label}</span>}
                       </span>
-                    </div>
-                    <span className="mt-0.5 max-w-[72px] truncate rounded bg-black/45 px-1 text-[11px] font-medium text-white">
-                      {surname(p.name)}
-                    </span>
-                  </button>
-                ));
+                    </button>
+                  );
+                });
               })}
             </div>
+            <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-subtle">
+              {[0.95, 0.75, 0.5, 0.2].map((v) => (
+                <span key={v} className="inline-flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full" style={{ background: bandColor(v) }} />
+                  {bandLabel(v)}
+                </span>
+              ))}
+            </div>
 
-            <p className="mt-2 text-center text-xs text-[#6B7280]">
-              Touche un joueur pour voir <span className="text-[#9CA3AF]">notre note</span> et
-              pourquoi.
-            </p>
-
-            {result.tacticalSubs && result.tacticalSubs.length > 0 && (
-              <div className="mt-6">
-                <h2 className="mb-1 text-sm font-bold text-[#F9FAFB]">
-                  Remplacements tactiques
-                </h2>
-                <p className="mb-3 text-xs text-[#6B7280]">
-                  Des suggestions, pas des obligations. Touche « ? » pour le pourquoi.
-                </p>
-                <div className="space-y-2">
-                  {result.tacticalSubs.map((s, i) => (
-                    <div
-                      key={`${s.out.id}-${s.in.id}`}
-                      className="rounded-xl border border-[#1F4641] bg-[#0F2F2B] p-3"
-                    >
-                      <div className="flex items-center gap-2">
-                        {/* Sortant */}
-                        <div className="flex min-w-0 flex-1 items-center gap-2">
-                          <Jersey club={s.out.clubName} size={30} />
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-medium text-[#F9FAFB]">
-                              {surname(s.out.name)}
-                            </div>
-                            <div className="text-[10px] text-[#6B7280]">
-                              {s.out.score.toFixed(1)}
-                            </div>
-                          </div>
-                        </div>
-
-                        <span className="shrink-0 text-emerald-400">→</span>
-
-                        {/* Entrant */}
-                        <div className="flex min-w-0 flex-1 items-center gap-2">
-                          <Jersey club={s.in.clubName} size={30} />
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-medium text-[#F9FAFB]">
-                              {surname(s.in.name)}
-                            </div>
-                            <div className="text-[10px] text-[#6B7280]">
-                              {s.in.score.toFixed(1)}
-                            </div>
-                          </div>
-                        </div>
-
-                        <button
-                          onClick={() => setOpenSub(openSub === i ? null : i)}
-                          aria-label="Pourquoi cette suggestion"
-                          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold transition ${
-                            openSub === i
-                              ? "bg-emerald-500 text-[#04120E]"
-                              : "bg-[#1F4641] text-[#9CA3AF]"
-                          }`}
-                        >
-                          ?
-                        </button>
-                      </div>
-
-                      {openSub === i && (
-                        <div className="mt-3 border-t border-[#1F4641] pt-3">
-                          <span
-                            className={`mr-2 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                              s.kind === "securite"
-                                ? "bg-amber-400/15 text-amber-300"
-                                : s.kind === "filet"
-                                  ? "bg-violet-400/15 text-violet-300"
-                                  : "bg-sky-400/15 text-sky-300"
-                            }`}
-                          >
-                            {s.kind === "securite"
-                              ? "Sécurité"
-                              : s.kind === "filet"
-                                ? "Filet"
-                                : "Alternative"}
-                          </span>
-                          <span className="text-sm text-[#F9FAFB]">{s.reason}</span>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+            {/* Duel contre l'adversaire */}
+            {result.matchup && (
+              <div className="mt-5 rounded-xl border border-line bg-card p-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-bold text-fg">Contre {league?.opponentName || "ton adversaire"}</h2>
+                  <Link href={`/ligue/${leagueId}/adversaire`} className="text-xs text-accent">
+                    Modifier
+                  </Link>
                 </div>
+                <div className="mt-3 flex h-3 overflow-hidden rounded-full" aria-hidden>
+                  <div className="bg-emerald-500" style={{ width: `${result.matchup.win * 100}%` }} />
+                  <div className="bg-chip-strong" style={{ width: `${result.matchup.draw * 100}%` }} />
+                  <div className="bg-red-500" style={{ width: `${result.matchup.loss * 100}%` }} />
+                </div>
+                <p className="mt-2 text-sm text-fg tabular-nums">
+                  Victoire {Math.round(result.matchup.win * 100)} % · nul {Math.round(result.matchup.draw * 100)} % · défaite{" "}
+                  {Math.round(result.matchup.loss * 100)} %
+                </p>
+                <p className="text-xs text-subtle">
+                  Son 11 probable : {formatFormation(result.matchup.opponentFormation)}, note {result.matchup.opponentScore}/100.
+                  {league?.opponentCheatCode && " Cheat Code adverse pris en compte (−0,5 sur tes joueurs de champ)."}
+                </p>
               </div>
             )}
+            {!result.matchup && (
+              <Link
+                href={`/ligue/${leagueId}/adversaire`}
+                className="mt-5 block rounded-xl border border-dashed border-chip-strong p-3 text-center text-sm text-muted"
+              >
+                Ajoute l&apos;effectif de ton adversaire pour voir tes chances de victoire →
+              </Link>
+            )}
 
-            {(["G", "D", "M", "A"] as const).some((k) => (result.substitutes[k] ?? []).length > 0) && (
+            {/* Banc ordonné */}
+            {bench.length > 0 && (
               <div className="mt-6">
-                <h2 className="mb-2 text-sm font-bold text-[#F9FAFB]">Sur le banc</h2>
-                <div className="flex flex-wrap gap-2">
-                  {POS_ORDER.flatMap((pos) => result.substitutes[pos] ?? []).map((p) => (
+                <h2 className="mb-1 text-sm font-bold text-fg">Banc, dans l&apos;ordre</h2>
+                <p className="mb-2 text-xs text-subtle">
+                  Si un titulaire ne joue pas, MPG fait entrer le premier remplaçant de son poste qui a joué.
+                  {result.stats.rotaldoRate >= 0.05 &&
+                    ` Risque d'aligner Rotaldo (2,5) : ${Math.round(result.stats.rotaldoRate * 100)} %.`}
+                </p>
+                <div className="space-y-1.5">
+                  {bench.map((p) => (
                     <button
-                      key={pid(p)}
-                      onClick={() => setSelected(p)}
-                      className="flex items-center gap-2 rounded-lg border border-[#1F4641] bg-[#0F2F2B] py-1.5 pl-1.5 pr-2.5"
+                      key={p.id}
+                      onClick={() => setSelectedId(p.id)}
+                      className="flex w-full items-center gap-3 rounded-lg border border-line bg-card px-2 py-1.5 text-left"
                     >
-                      <Jersey club={p.clubName} size={26} />
-                      <span className="text-sm text-[#F9FAFB]">{surname(p.name)}</span>
-                      <span className={`rounded px-1 text-[10px] font-bold ${scoreTier(p.recommendationScore)}`}>
-                        {p.recommendationScore.toFixed(1)}
+                      <span className="w-4 text-center text-xs font-bold text-subtle tabular-nums">{p.benchOrder}</span>
+                      <PlayerToken club={p.club} pStart={p.pStart} size={26} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm text-fg">{p.name}</span>
+                        <span className="block text-[11px] text-subtle">
+                          {p.position} · titulaire {Math.round(p.pStart * 100)} %
+                        </span>
                       </span>
+                      <span className="text-sm font-semibold text-fg tabular-nums">{p.noteMean.toFixed(1)}</span>
                     </button>
                   ))}
                 </div>
               </div>
             )}
 
-            {result.lofteurs.filter((p) => p.recommendationScore === 0).length > 0 && (
-              <div className="mt-5">
-                <h2 className="mb-2 text-sm font-bold text-[#F9FAFB]">Indisponibles</h2>
-                <div className="flex flex-wrap gap-1.5">
-                  {result.lofteurs
-                    .filter((p) => p.recommendationScore === 0)
-                    .map((p) => (
-                      <span
-                        key={pid(p)}
-                        className="rounded-md border border-red-500/25 bg-red-500/10 px-2 py-1 text-xs text-red-300"
-                      >
-                        {surname(p.name)} · {statusLabel(p) ?? "absent"}
-                      </span>
-                    ))}
+            {/* Remplacements tactiques */}
+            {result.tacticalSubs.length > 0 && (
+              <div className="mt-6">
+                <h2 className="mb-1 text-sm font-bold text-fg">Remplacements tactiques</h2>
+                <p className="mb-3 text-xs text-subtle">Des suggestions, pas des obligations. Touche « ? » pour le pourquoi.</p>
+                <div className="space-y-2">
+                  {result.tacticalSubs.map((s, i) => (
+                    <div key={`${s.out.id}-${s.in.id}`} className="rounded-xl border border-line bg-card p-3">
+                      <div className="flex items-center gap-2 text-sm">
+                        <span className="min-w-0 flex-1 truncate text-fg">{shortName(s.out.name)}</span>
+                        <span className="shrink-0 text-accent">→</span>
+                        <span className="min-w-0 flex-1 truncate text-fg">{shortName(s.in.name)}</span>
+                        {s.threshold != null && (
+                          <span className="shrink-0 rounded bg-chip px-1.5 py-0.5 text-[11px] text-muted tabular-nums">si note &lt; {s.threshold}</span>
+                        )}
+                        <button
+                          onClick={() => setOpenSub(openSub === i ? null : i)}
+                          aria-label="Pourquoi cette suggestion"
+                          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                            openSub === i ? "bg-emerald-500 text-on-accent" : "bg-chip text-muted"
+                          }`}
+                        >
+                          ?
+                        </button>
+                      </div>
+                      {openSub === i && (
+                        <p className="mt-2 border-t border-line pt-2 text-sm text-fg">
+                          <span
+                            className={`mr-2 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                              s.kind === "securite" ? "bg-amber-400/15 text-warn" : s.kind === "filet" ? "bg-violet-400/15 text-violet" : "bg-sky-400/15 text-info"
+                            }`}
+                          >
+                            {s.kind === "securite" ? "Sécurité" : s.kind === "filet" ? "Filet" : "Alternative"}
+                          </span>
+                          {s.reason}
+                        </p>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
-          </>
+
+            {unavailable.length > 0 && (
+              <div className="mt-5">
+                <h2 className="mb-2 text-sm font-bold text-fg">Indisponibles</h2>
+                <div className="flex flex-wrap gap-1.5">
+                  {unavailable.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => setSelectedId(p.id)}
+                      className="rounded-md border border-red-500/25 bg-red-500/10 px-2 py-1 text-xs text-danger"
+                    >
+                      {shortName(p.name)} · {p.statusLabel ?? (p.status === "suspended" ? "suspendu" : p.status === "out" ? "hors groupe" : "blessé")}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {league?.mpg && <SubmitToMpg league={league} result={result} />}
+
+            {features?.chat && (
+              <button
+                onClick={() => setChatOpen(true)}
+                className="mt-6 w-full rounded-lg border border-emerald-500/40 bg-emerald-600/10 py-2.5 text-sm font-medium text-accent"
+              >
+                Pose une question sur ta compo
+              </button>
+            )}
+
+            <p className="mt-6 text-center text-[11px] leading-relaxed text-subtle">
+              Compos : {result.lineupSources.length ? result.lineupSources.map((s) => `${s.source} (${s.clubs} clubs)`).join(", ") : "pas encore publiées"}
+              {" · "}Cotes : {result.oddsAvailable.matchOdds ? "bookmakers via MPGStats" : "indisponibles"}
+              {result.oddsAvailable.scorerOdds ? " + cotes buteur" : ""}
+              {" · "}Modèle {result.modelVersion} ·{" "}
+              <Link href="/precision" className="underline">
+                notre précision
+              </Link>
+            </p>
+          </div>
         )}
       </div>
 
-      {selected && (
+      {selected && result && league && (
         <PlayerSheet
           p={selected}
-          captain={pid(selected) === captainId}
-          onClose={() => setSelected(null)}
+          captain={selected.id === result.captainId}
+          alternative={players
+            .filter((x) => x.position === selected.position && x.id !== selected.id && x.role !== "out")
+            .sort((a, b) => b.value - a.value)[0]}
+          override={league.overrides[selected.id]}
+          championshipId={league.championshipId}
+          round={result.round}
+          onOverride={(v) => {
+            const next = { ...league.overrides };
+            if (v == null) delete next[selected.id];
+            else next[selected.id] = v;
+            update({ overrides: next });
+          }}
+          onClose={() => setSelectedId(null)}
         />
       )}
+
+      {chatOpen && result && <CoachChat result={result} onClose={() => setChatOpen(false)} />}
+    </div>
+  );
+}
+
+/** Envoi de la compo sur MPG, après confirmation explicite. */
+function SubmitToMpg({ league, result }: { league: NonNullable<ReturnType<typeof useLeague>[0]>; result: RecommendResult }) {
+  const [step, setStep] = useState<"idle" | "confirm" | "sending" | "done">("idle");
+  const [message, setMessage] = useState<string | null>(null);
+  if (!league.mpg) return null;
+  const mpg = league.mpg;
+
+  async function send() {
+    setStep("sending");
+    setMessage(null);
+    const starters = result.players.filter((p) => p.role === "starter").map((p) => ({ id: p.id, position: p.position }));
+    const bench = result.players
+      .filter((p) => p.role === "bench")
+      .sort((a, b) => (a.benchOrder ?? 0) - (b.benchOrder ?? 0))
+      .map((p) => ({ id: p.id, position: p.position }));
+    const res = await fetch("/api/mpg/submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        divisionId: mpg.divisionId,
+        teamId: mpg.teamId,
+        championshipId: league.championshipId,
+        plan: {
+          formation: result.formation,
+          starters,
+          bench,
+          captainId: result.captainId,
+          tacticalSubs: result.tacticalSubs
+            .filter((t) => t.threshold != null)
+            .map((t) => ({ outId: t.out.id, inId: t.in.id, threshold: t.threshold })),
+        },
+      }),
+    }).catch(() => null);
+    const d = res ? await res.json().catch(() => ({})) : {};
+    if (!res || !res.ok) {
+      setStep("idle");
+      setMessage(res?.status === 401 ? "Session MPG expirée : reconnecte-toi depuis Importer depuis MPG." : d.error ?? "Envoi impossible.");
+      return;
+    }
+    setStep("done");
+    setMessage("Compo envoyée sur MPG. Vérifie-la dans l'app MPG.");
+  }
+
+  return (
+    <div className="mt-6 rounded-xl border border-line bg-card p-4">
+      {step === "confirm" ? (
+        <>
+          <p className="text-sm text-fg">
+            Remplacer ta compo MPG de la J{result.round} ({mpg.leagueName ?? league.name}) par celle-ci : {formatFormation(result.formation)},
+            capitaine {shortName(result.players.find((p) => p.id === result.captainId)?.name)}, {result.tacticalSubs.filter((t) => t.threshold != null).length} remplacement(s) tactique(s) ?
+          </p>
+          <div className="mt-3 flex gap-2">
+            <button onClick={send} className="flex-1 rounded-lg bg-emerald-600 py-2 text-sm font-medium text-white">
+              Oui, envoyer
+            </button>
+            <button onClick={() => setStep("idle")} className="flex-1 rounded-lg bg-chip py-2 text-sm text-fg">
+              Annuler
+            </button>
+          </div>
+        </>
+      ) : (
+        <button
+          onClick={() => setStep("confirm")}
+          disabled={step === "sending"}
+          className="w-full rounded-lg bg-emerald-600 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+        >
+          {step === "sending" ? "Envoi…" : step === "done" ? "Renvoyer sur MPG" : "Envoyer cette compo sur MPG"}
+        </button>
+      )}
+      {message && <p className="mt-2 text-sm text-muted">{message}</p>}
     </div>
   );
 }
@@ -364,88 +547,230 @@ export default function OnzePage() {
 function PlayerSheet({
   p,
   captain,
+  alternative,
+  override,
+  championshipId,
+  round,
+  onOverride,
   onClose,
 }: {
-  p: ResultPlayer;
+  p: SquadPlayer;
   captain: boolean;
+  alternative?: SquadPlayer;
+  override?: number;
+  championshipId: string;
+  round: number;
+  onOverride: (v: number | undefined) => void;
   onClose: () => void;
 }) {
-  const status = statusLabel(p);
-  const reasons = p.reasons ?? [];
+  const [draft, setDraft] = useState(Math.round((override ?? p.pStart) * 100));
+  const voteKey = `vote:${championshipId}:${round}:${p.id}`;
+  const [voted, setVoted] = useState<string | null>(() => {
+    try {
+      return typeof window === "undefined" ? null : localStorage.getItem(voteKey);
+    } catch {
+      return null;
+    }
+  });
+
+  async function vote(v: "start" | "bench" | "out") {
+    setVoted(v);
+    try {
+      localStorage.setItem(voteKey, v);
+    } catch {
+      /* stockage bloqué */
+    }
+    await fetch("/api/crowd", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ championshipId, playerId: p.id, vote: v }),
+    }).catch(() => undefined);
+  }
+
+  const base = p.explanation.find((e) => e.term === "base");
+  const factors = p.explanation.filter((e) => e.term !== "base");
+  const modelTotal = p.explanation.reduce((a, e) => a + e.value, 0);
+  const adjustment = p.noteMean - Math.min(8.5, Math.max(3, modelTotal));
+  const diff = alternative ? p.value - alternative.value : null;
+
   return (
     <div className="fixed inset-0 z-20 flex items-end" onClick={onClose}>
       <div className="absolute inset-0 bg-black/50" />
       <div
-        className="relative w-full rounded-t-2xl border-t border-[#1F4641] bg-[#0F2F2B] p-5 pb-8"
+        className="relative max-h-[88vh] w-full overflow-y-auto rounded-t-2xl border-t border-line bg-card p-5 pb-8"
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-label={p.name}
       >
-        <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-[#3A5A54]" />
-
-        <div className="flex items-center gap-3">
-          <Jersey club={p.clubName} size={48} />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="truncate text-lg font-bold text-[#F9FAFB]">{p.name}</span>
-              {captain && (
-                <span className="rounded bg-emerald-500 px-1.5 text-[11px] font-bold text-[#04120E]">
-                  Capitaine
-                </span>
-              )}
+        <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-chip-strong" />
+        <div className="mx-auto max-w-md">
+          <div className="flex items-center gap-3">
+            <PlayerToken club={p.club} pStart={p.pStart} size={44} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="truncate text-lg font-bold text-fg">{p.name}</span>
+                {captain && <span className="rounded bg-amber-400 px-1.5 text-[11px] font-bold text-black">Capitaine</span>}
+              </div>
+              <div className="truncate text-sm text-muted">
+                {p.club} · {p.detailedPosition || p.position}
+                {p.quotation != null && ` · cote ${p.quotation}`}
+                {p.opponentName && (
+                  <span className="text-subtle">
+                    {" → "}
+                    {p.opponentName} {p.isHome ? "(dom.)" : "(ext.)"}
+                  </span>
+                )}
+              </div>
             </div>
-            <div className="truncate text-sm text-[#9CA3AF]">
-              {p.clubName}
-              {p.nextOpponentName && (
-                <span className="text-[#6B7280]">
-                  {" → "}
-                  {p.nextOpponentName} {p.isHome ? "(dom.)" : "(ext.)"}
-                </span>
+            <div className="text-right">
+              <div className="text-2xl font-bold text-accent tabular-nums">{p.noteMean.toFixed(1)}</div>
+              <div className="text-[10px] uppercase tracking-wide text-subtle">note attendue</div>
+            </div>
+          </div>
+
+          {/* Titularisation */}
+          <div className="mt-4 rounded-xl bg-bg p-3">
+            <div className="flex items-baseline justify-between">
+              <span className="text-sm font-semibold text-fg">{bandLabel(p.pStart)}</span>
+              <span className="text-sm tabular-nums text-fg">{Math.round(p.pStart * 100)} %</span>
+            </div>
+            <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-chip">
+              <div className="h-full rounded-full" style={{ width: `${p.pStart * 100}%`, background: bandColor(p.pStart) }} />
+            </div>
+            <p className="mt-1.5 text-[11px] text-subtle">
+              Sources : modèle{p.signals.length ? `, ${p.signals.join(", ")}` : ""}. Probabilité d&apos;être noté : {Math.round(p.pPlay * 100)} %.
+            </p>
+            <label htmlFor="override" className="mt-3 block text-xs font-medium text-muted">
+              Et si… tu sais mieux ? Ta probabilité de titularisation : {draft} %
+            </label>
+            <input
+              id="override"
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={draft}
+              onChange={(e) => setDraft(Number(e.target.value))}
+              className="mt-1 w-full accent-emerald-500"
+            />
+            <div className="mt-1 flex gap-2">
+              <button onClick={() => onOverride(draft / 100)} className="flex-1 rounded-lg bg-emerald-600 py-1.5 text-xs font-medium text-white">
+                Recalculer la compo
+              </button>
+              {override != null && (
+                <button onClick={() => onOverride(undefined)} className="flex-1 rounded-lg bg-chip py-1.5 text-xs text-fg">
+                  Revenir au calcul
+                </button>
               )}
             </div>
           </div>
-          {p.recommendationScore > 0 && (
-            <div className="text-right">
-              <div className="text-2xl font-bold text-emerald-400">
-                {p.recommendationScore.toFixed(1)}
-              </div>
-              <div className="text-[10px] uppercase tracking-wide text-[#6B7280]">Notre note</div>
+
+          {/* Forme */}
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-subtle">5 derniers matchs</p>
+              <p className="text-[11px] text-subtle">× = absent ou non noté</p>
             </div>
-          )}
-        </div>
+            <Sparkline notes={p.lastNotes} />
+          </div>
 
-        <p className="mt-1 text-[11px] text-[#6B7280]">
-          Notre estimation pour cette journée — pas la note MPG.
-        </p>
-
-        {status && p.recommendationScore === 0 && (
-          <p className="mt-4 rounded-lg border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-300">
-            Écarté du onze : {status.toLowerCase()}.
-          </p>
-        )}
-
-        {reasons.length > 0 && (
+          {/* Décomposition */}
           <div className="mt-4">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#6B7280]">
-              Pourquoi cette note
-            </p>
-            <div className="space-y-1.5">
-              {reasons.map((r, i) => (
-                <div key={i} className="flex items-center gap-2 text-sm">
-                  <span className={r.positive ? "text-emerald-400" : "text-red-400"}>
-                    {r.positive ? "▲" : "▼"}
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-subtle">D&apos;où vient la note attendue</p>
+            <div className="space-y-1 text-sm tabular-nums">
+              {base && (
+                <div className="flex justify-between text-muted">
+                  <span>{base.label}</span>
+                  <span>{base.value.toFixed(2)}</span>
+                </div>
+              )}
+              {factors.map((f) => (
+                <div key={f.term} className="flex justify-between">
+                  <span className="text-fg">{f.label}</span>
+                  <span className={f.value >= 0 ? "text-accent" : "text-danger"}>
+                    {f.value >= 0 ? "+" : "−"}
+                    {Math.abs(f.value).toFixed(2)}
                   </span>
-                  <span className="text-[#F9FAFB]">{r.label}</span>
+                </div>
+              ))}
+              {Math.abs(adjustment) >= 0.01 && (
+                <div className="flex justify-between">
+                  <span className="text-fg">Clean sheet selon les cotes</span>
+                  <span className={adjustment >= 0 ? "text-accent" : "text-danger"}>
+                    {adjustment >= 0 ? "+" : "−"}
+                    {Math.abs(adjustment).toFixed(2)}
+                  </span>
+                </div>
+              )}
+              <div className="flex justify-between border-t border-line pt-1 font-semibold text-fg">
+                <span>Note attendue s&apos;il joue</span>
+                <span>{p.noteMean.toFixed(2)}</span>
+              </div>
+              {p.goalRate > 0.02 && (
+                <div className="flex justify-between text-muted">
+                  <span>Chances de marquer s&apos;il joue</span>
+                  <span>{Math.round((1 - Math.exp(-p.goalRate)) * 100)} %</span>
+                </div>
+              )}
+              {p.cleanSheetProb != null && (p.position === "G" || p.position === "D") && (
+                <div className="flex justify-between text-muted">
+                  <span>Clean sheet (bookmakers)</span>
+                  <span>{Math.round(p.cleanSheetProb * 100)} %</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {alternative && diff != null && (
+            <p className="mt-3 rounded-lg bg-bg p-2.5 text-sm text-fg">
+              Face à {shortName(alternative.name)} ({alternative.role === "starter" ? "titulaire" : "remplaçant"}) :{" "}
+              <span className={diff >= 0 ? "text-accent" : "text-danger"}>
+                {diff >= 0 ? "+" : "−"}
+                {Math.abs(diff).toFixed(2)} pt
+              </span>{" "}
+              de valeur attendue.
+            </p>
+          )}
+
+          {p.reasons.length > 0 && (
+            <div className="mt-4 space-y-1.5">
+              {p.reasons.map((r, i) => (
+                <div key={i} className="flex items-start gap-2 text-sm">
+                  <span className={r.positive ? "text-accent" : "text-danger"}>{r.positive ? "▲" : "▼"}</span>
+                  <span className="text-fg">{r.label}</span>
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          )}
 
-        <button
-          onClick={onClose}
-          className="mt-6 w-full rounded-lg bg-[#1F4641] py-2.5 font-medium text-[#F9FAFB]"
-        >
-          Fermer
-        </button>
+          {/* Communauté */}
+          <div className="mt-5">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-subtle">Tu as une info ? Dis-le à la communauté</p>
+            <div className="grid grid-cols-3 gap-2">
+              {(
+                [
+                  ["start", "Titulaire"],
+                  ["bench", "Remplaçant"],
+                  ["out", "Absent"],
+                ] as const
+              ).map(([k, label]) => (
+                <button
+                  key={k}
+                  disabled={!!voted}
+                  onClick={() => vote(k)}
+                  className={`rounded-lg py-1.5 text-xs ${voted === k ? "bg-emerald-600 text-white" : "bg-chip text-fg"} disabled:opacity-60`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {voted && <p className="mt-1 text-[11px] text-subtle">Merci, ton signalement compte pour la prochaine mise à jour.</p>}
+          </div>
+
+          <button onClick={onClose} className="mt-6 w-full rounded-lg bg-chip py-2.5 font-medium text-fg">
+            Fermer
+          </button>
+        </div>
       </div>
     </div>
   );

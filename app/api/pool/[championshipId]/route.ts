@@ -1,46 +1,42 @@
 /**
- * Vivier des joueurs d'un championnat, pour composer un effectif à la main.
- *
- * Aucune authentification MPG : la liste vient de MPGStats (joignable depuis Vercel).
- * Le résultat est stable sur une saison, donc mis en cache par Next.js.
+ * Vivier des joueurs d'un championnat, pour composer un effectif à la main :
+ * nom, club, poste (et poste détaillé), cote MPG, moyenne de la saison.
+ * Source : MPGStats (un appel, mis en cache).
  */
-
 import { NextResponse } from "next/server";
-import { getChampionshipRoster } from "@/lib/mpgstats-client";
+import { loadChampionship } from "@/lib/data/mpgstats";
 import { getSupportedChampionships } from "@/lib/championships";
 
-// Cache côté serveur : le vivier ne change qu'aux mouvements de mercato.
-export const revalidate = 21600; // 6 h
+export const revalidate = 3600;
 
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ championshipId: string }> }
-) {
+export async function GET(_request: Request, { params }: { params: Promise<{ championshipId: string }> }) {
   const { championshipId } = await params;
-
   if (!getSupportedChampionships().some((c) => c.id === championshipId)) {
-    return NextResponse.json(
-      { error: "Championnat non supporté" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "Championnat non supporté" }, { status: 400 });
   }
-
-  try {
-    const players = await getChampionshipRoster(championshipId);
-    if (players.length === 0) {
-      return NextResponse.json(
-        { error: "Vivier indisponible pour ce championnat", players: [] },
-        { status: 502 }
-      );
-    }
-    return NextResponse.json(
-      { championshipId, count: players.length, players },
-      { headers: { "Cache-Control": "public, max-age=21600, stale-while-revalidate=86400" } }
-    );
-  } catch {
-    return NextResponse.json(
-      { error: "Erreur lors de la récupération du vivier", players: [] },
-      { status: 500 }
-    );
+  const snap = await loadChampionship(championshipId);
+  if (!snap) {
+    return NextResponse.json({ error: "Vivier indisponible pour ce championnat", players: [] }, { status: 502 });
   }
+  const current = new Set(snap.currentClubIds);
+  const players = snap.players
+    .filter((p) => p.clubId != null && current.has(p.clubId))
+    .map((p) => {
+      const rated = p.matches.filter((m) => m.seasonId === snap.currentSeasonId && m.note > 0);
+      return {
+        id: p.id,
+        name: p.name,
+        club: p.club,
+        position: p.position,
+        detailedPosition: p.detailedPosition,
+        quotation: p.quotation ?? null,
+        average: rated.length ? Math.round((rated.reduce((a, m) => a + m.note, 0) / rated.length) * 100) / 100 : null,
+        matches: rated.length,
+      };
+    })
+    .sort((a, b) => a.club.localeCompare(b.club) || a.name.localeCompare(b.name));
+  return NextResponse.json(
+    { championshipId, count: players.length, players },
+    { headers: { "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400" } }
+  );
 }

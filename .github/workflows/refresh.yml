@@ -1,0 +1,19 @@
+# Rafraîchissement horaire (compos probables, alertes push, précision).
+# Le plan gratuit de Vercel n'autorise qu'une tâche planifiée par jour : ce
+# workflow appelle la route toutes les heures à la place.
+# À configurer dans Settings → Secrets → Actions : APP_URL et CRON_SECRET.
+name: Rafraîchissement horaire
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch: {}
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    if: ${{ vars.ENABLE_HOURLY_REFRESH == 'true' }}
+    steps:
+      - name: Appeler /api/cron/refresh
+        run: |
+          curl --fail --silent --show-error --max-time 290 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.APP_URL }}/api/cron/refresh"

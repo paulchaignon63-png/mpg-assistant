@@ -1,0 +1,303 @@
+{
+  "1": {
+    "championshipId": "1",
+    "rounds": 4,
+    "squadsPerRound": 25,
+    "newPoints": 57.685,
+    "oldPoints": 56.95,
+    "naivePoints": 57.025,
+    "newBeatsOld": 0.6923076923076923,
+    "noteMae": 0.6879978249893491,
+    "baselineMae": 0.6893263526720744,
+    "startBrier": 0.1802208930277791,
+    "baselineBrier": 0.18925373931623965,
+    "perRound": [
+      {
+        "seasonId": 55,
+        "round": 3,
+        "newPoints": 58.32,
+        "oldPoints": 57.38,
+        "naivePoints": 57.58,
+        "noteMae": 0.7514118417725932,
+        "baselineMae": 0.7263414634146341
+      },
+      {
+        "seasonId": 55,
+        "round": 4,
+        "newPoints": 57.86,
+        "oldPoints": 57.1,
+        "naivePoints": 57.2,
+        "noteMae": 0.5420005393274285,
+        "baselineMae": 0.5530995203836929
+      },
+      {
+        "seasonId": 55,
+        "round": 5,
+        "newPoints": 57.32,
+        "oldPoints": 57.06,
+        "naivePoints": 56.86,
+        "noteMae": 0.7347683341974252,
+        "baselineMae": 0.7371125694093897
+      },
+      {
+        "seasonId": 55,
+        "round": 6,
+        "newPoints": 57.24,
+        "oldPoints": 56.26,
+        "naivePoints": 56.46,
+        "noteMae": 0.7238105846599496,
+        "baselineMae": 0.7407518574805811
+      }
+    ],
+    "generatedAt": "2026-10-18T19:10:27.402Z",
+    "holdout": true
+  },
+  "2": {
+    "championshipId": "2",
+    "rounds": 4,
+    "squadsPerRound": 25,
+    "newPoints": 57.07,
+    "oldPoints": 57.095,
+    "naivePoints": 57.13,
+    "newBeatsOld": 0.5308641975308642,
+    "noteMae": 0.7208861805744347,
+    "baselineMae": 0.7279376275592512,
+    "startBrier": 0.16233068285737387,
+    "baselineBrier": 0.15575574712643667,
+    "perRound": [
+      {
+        "seasonId": 54,
+        "round": 3,
+        "newPoints": 55.88,
+        "oldPoints": 55.64,
+        "naivePoints": 56.44,
+        "noteMae": 0.6318731752708822,
+        "baselineMae": 0.6389087947882733
+      },
+      {
+        "seasonId": 54,
+        "round": 4,
+        "newPoints": 58.22,
+        "oldPoints": 58.06,
+        "naivePoints": 58.3,
+        "noteMae": 0.7506994496624984,
+        "baselineMae": 0.7429913137893598
+      },
+      {
+        "seasonId": 54,
+        "round": 5,
+        "newPoints": 57.22,
+        "oldPoints": 57.3,
+        "naivePoints": 56.56,
+        "noteMae": 0.7448983383911972,
+        "baselineMae": 0.7634962822338236
+      },
+      {
+        "seasonId": 54,
+        "round": 6,
+        "newPoints": 56.96,
+        "oldPoints": 57.38,
+        "naivePoints": 57.22,
+        "noteMae": 0.7560737589731609,
+        "baselineMae": 0.7663541194255479
+      }
+    ],
+    "generatedAt": "2026-10-18T19:10:30.249Z",
+    "holdout": true
+  },
+  "3": {
+    "championshipId": "3",
+    "rounds": 6,
+    "squadsPerRound": 25,
+    "newPoints": 57.04,
+    "oldPoints": 56.586666666666666,
+    "naivePoints": 56.48000000000001,
+    "newBeatsOld": 0.6138613861386139,
+    "noteMae": 0.7595995722333755,
+    "baselineMae": 0.7678537923649734,
+    "startBrier": 0.1994073980891064,
+    "baselineBrier": 0.21605122709699331,
+    "perRound": [
+      {
+        "seasonId": 53,
+        "round": 3,
+        "newPoints": 58.12,
+        "oldPoints": 58.12,
+        "naivePoints": 57.16,
+        "noteMae": 0.7970312779973233,
+        "baselineMae": 0.8141612903225806
+      },
+      {
+        "seasonId": 53,
+        "round": 4,
+        "newPoints": 57.48,
+        "oldPoints": 57.54,
+        "naivePoints": 57.18,
+        "noteMae": 0.7941762344341298,
+        "baselineMae": 0.7931347962382445
+      },
+      {
+        "seasonId": 53,
+        "round": 5,
+        "newPoints": 55.82,
+        "oldPoints": 55.62,
+        "naivePoints": 55.38,
+        "noteMae": 0.7279264907941342,
+        "baselineMae": 0.7155959963603272
+      },
+      {
+        "seasonId": 53,
+        "round": 6,
+        "newPoints": 57.06,
+        "oldPoints": 56.3,
+        "naivePoints": 56.14,
+        "noteMae": 0.7791736535265453,
+        "baselineMae": 0.7930321386505136
+      },
+      {
+        "seasonId": 53,
+        "round": 7,
+        "newPoints": 57.7,
+        "oldPoints": 57.24,
+        "naivePoints": 57.48,
+        "noteMae": 0.77142706890161,
+        "baselineMae": 0.7877705280830282
+      },
+      {
+        "seasonId": 53,
+        "round": 8,
+        "newPoints": 56.06,
+        "oldPoints": 54.7,
+        "naivePoints": 55.54,
+        "noteMae": 0.6878627077465106,
+        "baselineMae": 0.7034280045351474
+      }
+    ],
+    "generatedAt": "2026-10-18T19:38:50.635Z",
+    "holdout": true
+  },
+  "4": {
+    "championshipId": "4",
+    "rounds": 6,
+    "squadsPerRound": 25,
+    "newPoints": 57.23666666666667,
+    "oldPoints": 56.800000000000004,
+    "naivePoints": 57.06666666666666,
+    "newBeatsOld": 0.5689655172413793,
+    "noteMae": 0.6588175817055443,
+    "baselineMae": 0.6702696055694458,
+    "startBrier": 0.1577530553750845,
+    "baselineBrier": 0.18381016168452952,
+    "perRound": [
+      {
+        "seasonId": 56,
+        "round": 3,
+        "newPoints": 56.46,
+        "oldPoints": 55.76,
+        "naivePoints": 56.58,
+        "noteMae": 0.6748031437466782,
+        "baselineMae": 0.6904198473282445
+      },
+      {
+        "seasonId": 56,
+        "round": 4,
+        "newPoints": 56.94,
+        "oldPoints": 57.08,
+        "naivePoints": 56.76,
+        "noteMae": 0.7584350199436701,
+        "baselineMae": 0.7518811274509801
+      },
+      {
+        "seasonId": 56,
+        "round": 5,
+        "newPoints": 58.5,
+        "oldPoints": 57.78,
+        "naivePoints": 57.88,
+        "noteMae": 0.6307734822118152,
+        "baselineMae": 0.6394179894179894
+      },
+      {
+        "seasonId": 56,
+        "round": 6,
+        "newPoints": 57,
+        "oldPoints": 56.52,
+        "naivePoints": 56.94,
+        "noteMae": 0.6282702415067721,
+        "baselineMae": 0.6448982607227292
+      },
+      {
+        "seasonId": 56,
+        "round": 7,
+        "newPoints": 56.42,
+        "oldPoints": 56.9,
+        "naivePoints": 56.86,
+        "noteMae": 0.6172181920084352,
+        "baselineMae": 0.6157847222222227
+      },
+      {
+        "seasonId": 56,
+        "round": 8,
+        "newPoints": 58.1,
+        "oldPoints": 56.76,
+        "naivePoints": 57.38,
+        "noteMae": 0.6434054108158952,
+        "baselineMae": 0.6792156862745092
+      }
+    ],
+    "generatedAt": "2026-10-18T19:38:52.358Z",
+    "holdout": true
+  },
+  "5": {
+    "championshipId": "5",
+    "rounds": 4,
+    "squadsPerRound": 25,
+    "newPoints": 57.555,
+    "oldPoints": 57.025000000000006,
+    "naivePoints": 56.975,
+    "newBeatsOld": 0.6506024096385542,
+    "noteMae": 0.6528532431747651,
+    "baselineMae": 0.672572074949534,
+    "startBrier": 0.2076457801346654,
+    "baselineBrier": 0.20362975391499105,
+    "perRound": [
+      {
+        "seasonId": 52,
+        "round": 3,
+        "newPoints": 58.16,
+        "oldPoints": 58.26,
+        "naivePoints": 58.08,
+        "noteMae": 0.6583628300326592,
+        "baselineMae": 0.6774685534591193
+      },
+      {
+        "seasonId": 52,
+        "round": 4,
+        "newPoints": 56.7,
+        "oldPoints": 56.36,
+        "naivePoints": 56.48,
+        "noteMae": 0.6902067985371514,
+        "baselineMae": 0.7007028753993608
+      },
+      {
+        "seasonId": 52,
+        "round": 5,
+        "newPoints": 58.54,
+        "oldPoints": 57.46,
+        "naivePoints": 57.38,
+        "noteMae": 0.6419613281317073,
+        "baselineMae": 0.6689312169312169
+      },
+      {
+        "seasonId": 52,
+        "round": 6,
+        "newPoints": 56.82,
+        "oldPoints": 56.02,
+        "naivePoints": 55.96,
+        "noteMae": 0.620882015997543,
+        "baselineMae": 0.6431856540084387
+      }
+    ],
+    "generatedAt": "2026-10-18T19:10:32.937Z",
+    "holdout": true
+  }
+}

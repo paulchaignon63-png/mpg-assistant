@@ -1,0 +1,124 @@
+{
+  "version": "appris-2026-10-18",
+  "trainedAt": "2026-10-18T19:10:22.427Z",
+  "samples": 66612,
+  "play": {
+    "intercept": -1.7764,
+    "coef": {
+      "rated5": 2.0712,
+      "started5": -0.1795,
+      "ratedLast": 1.6072,
+      "startedLast": 0.3455,
+      "minutesShare": 0.8791,
+      "quotation": -1.4017,
+      "earlySeason": -0.4944
+    }
+  },
+  "start": {
+    "intercept": -4.2484,
+    "coef": {
+      "rated5": 1.0654,
+      "started5": 0.2467,
+      "ratedLast": 1.5027,
+      "startedLast": 0.6494,
+      "minutesShare": 2.6301,
+      "quotation": 0.696,
+      "earlySeason": -0.3061
+    }
+  },
+  "note": {
+    "G": {
+      "intercept": 4.6638,
+      "coef": {
+        "recentNote": 0.0446,
+        "seasonNote": -0.1817,
+        "prevNote": 0.199,
+        "quotation": 0.6654,
+        "teamStrength": 0.2398,
+        "oppWeakness": 0.221,
+        "home": -0.0057
+      },
+      "means": {
+        "recentNote": 5.3974,
+        "seasonNote": 5.4002,
+        "prevNote": 5.3166,
+        "quotation": 0.2969,
+        "teamStrength": 0.533,
+        "oppWeakness": 0.5011,
+        "home": 0.501
+      },
+      "sd": 1.1558
+    },
+    "D": {
+      "intercept": 2.3142,
+      "coef": {
+        "recentNote": -0.0259,
+        "seasonNote": 0.2167,
+        "prevNote": 0.2288,
+        "quotation": 0.7611,
+        "teamStrength": 0.1838,
+        "oppWeakness": 0.4721,
+        "home": 0.1708
+      },
+      "means": {
+        "recentNote": 5.0464,
+        "seasonNote": 5.0443,
+        "prevNote": 5.0081,
+        "quotation": 0.2761,
+        "teamStrength": 0.5387,
+        "oppWeakness": 0.4999,
+        "home": 0.4979
+      },
+      "sd": 0.8719
+    },
+    "M": {
+      "intercept": 0.3665,
+      "coef": {
+        "recentNote": 0.1004,
+        "seasonNote": 0.4138,
+        "prevNote": 0.3323,
+        "quotation": 0.7993,
+        "teamStrength": 0.0954,
+        "oppWeakness": 0.3102,
+        "home": 0.1388
+      },
+      "means": {
+        "recentNote": 5.2085,
+        "seasonNote": 5.2032,
+        "prevNote": 5.1217,
+        "quotation": 0.2812,
+        "teamStrength": 0.5469,
+        "oppWeakness": 0.5008,
+        "home": 0.5022
+      },
+      "sd": 0.8786
+    },
+    "A": {
+      "intercept": 0.2321,
+      "coef": {
+        "recentNote": 0.2586,
+        "seasonNote": 0.3026,
+        "prevNote": 0.3288,
+        "quotation": 0.4624,
+        "teamStrength": 0.1021,
+        "oppWeakness": 0.2731,
+        "home": 0.1321
+      },
+      "means": {
+        "recentNote": 4.9828,
+        "seasonNote": 4.9751,
+        "prevNote": 4.9171,
+        "quotation": 0.2842,
+        "teamStrength": 0.5249,
+        "oppWeakness": 0.5004,
+        "home": 0.5038
+      },
+      "sd": 1.0067
+    }
+  },
+  "goals": {
+    "oppWeakness": 0.3396,
+    "home": 0.1653,
+    "teamStrength": 0.1133
+  }
+}
